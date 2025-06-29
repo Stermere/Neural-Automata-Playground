@@ -4,12 +4,26 @@
   left: 0;
   width: 100vw;
   height: 100vh;
+  padding-left: 1vw;
+  overflow-y: auto;
+  box-sizing: border-box;
   display: flex;
-  flex-direction: column;
-  justify-content: center;
+  flex-direction: row;
+  justify-content: flex-start;
   align-items: center;
   background-color: #1e1e1e;
   box-shadow: 0 4px 20px rgba(0, 0, 0, 0.5);
+  overscroll-behavior: contain;
+}
+
+@media (max-width: 2100px) {
+  .canvasContainer {
+    flex-direction: column;
+  }
+}
+
+.controlContainer {
+  flex-direction: column;
 }
 
 .canvas {

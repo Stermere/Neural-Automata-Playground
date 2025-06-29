@@ -67,6 +67,42 @@ export class WebGPUNeuralAutomataController {
     this.device.queue.writeBuffer(this.weightBuffer, 0, buffer);
   }
 
+  clearCanvas(): void {
+    const [w, h] = this.config.gridSize;
+    const totalPixels = w * h;
+    const pixels = new Uint8Array(totalPixels * 4);
+
+    for (let i = 0; i < totalPixels; i++) {
+      pixels[i * 4 + 0] = 0;   // R
+      pixels[i * 4 + 1] = 0;   // G
+      pixels[i * 4 + 2] = 0;   // B
+      pixels[i * 4 + 3] = 255; // A
+    }
+
+    const layout = { bytesPerRow: w * 4 };
+    const size = [w, h, 1];
+
+    this.device.queue.writeTexture({ texture: this.texA, origin: [0, 0, 0] }, pixels, layout, size);
+    this.device.queue.writeTexture({ texture: this.texB, origin: [0, 0, 0] }, pixels, layout, size);
+  }
+
+  randomizeCanvas(): void {
+    const [w, h] = this.config.gridSize;
+    const pixels = new Uint8Array(w * h * 4);
+    for (let i = 0; i < w * h; i++) {
+      pixels[i * 4 + 0] = Math.random() * 256;
+      pixels[i * 4 + 1] = Math.random() * 256;
+      pixels[i * 4 + 2] = Math.random() * 256;
+      pixels[i * 4 + 3] = 255;
+    }
+
+    const layout = { bytesPerRow: w * 4 };
+    const size = [w, h, 1];
+
+    this.device.queue.writeTexture({ texture: this.texA, origin: [0, 0, 0] }, pixels, layout, size);
+    this.device.queue.writeTexture({ texture: this.texB, origin: [0, 0, 0] }, pixels, layout, size);
+  }
+
   private createWeights(): GPUBuffer {
     const outputChannels = 3;
     const inputChannels = 3;
