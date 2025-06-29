@@ -1,0 +1,213 @@
+// src/controllers/WebGPUNeuralAutomataController.ts
+export interface AutomataConfig {
+  canvas: HTMLCanvasElement;
+  shaderPath: string;
+  gridSize: [number, number];
+  brushRadius?: number;
+}
+
+export class WebGPUNeuralAutomataController {
+  private device!: GPUDevice;
+  private context!: GPUCanvasContext;
+  private format: GPUTextureFormat = 'rgba8unorm';
+  private sampler!: GPUSampler;
+
+  private weightBuffer!: GPUBuffer;
+  private texA!: GPUTexture;
+  private texB!: GPUTexture;
+  private bindA!: GPUBindGroup;
+  private bindB!: GPUBindGroup;
+  private renderBind!: GPUBindGroup;
+
+  private computePipeline!: GPUComputePipeline;
+  private renderPipeline!: GPURenderPipeline;
+
+  private animationId = 0;
+  private drawing = false;
+  private brushRadius: number;
+
+  constructor(private config: AutomataConfig) {
+    this.brushRadius = config.brushRadius ?? 20;
+  }
+
+  async init(): Promise<void> {
+    const { canvas, shaderPath, gridSize } = this.config;
+    if (!navigator.gpu) throw new Error('WebGPU not supported');
+    const adapter = await navigator.gpu.requestAdapter();
+    this.device = await adapter!.requestDevice();
+    this.context = canvas.getContext('webgpu') as GPUCanvasContext;
+    this.context.configure({ device: this.device, format: this.format, alphaMode: 'premultiplied' });
+    this.sampler = this.device.createSampler({ magFilter: 'nearest', minFilter: 'nearest' });
+
+    // Textures
+    this.texA = this.createTexture(gridSize);
+    this.texB = this.createTexture(gridSize);
+
+    // Weights
+    this.weightBuffer = this.createWeights();
+
+    // Pipelines
+    this.computePipeline = await this.createComputePipeline(`${shaderPath}compute.wgsl`);
+    this.renderPipeline  = await this.createRenderPipeline(`${shaderPath}render.wgsl`);
+
+    // Bind groups
+    this.bindA = this.makeBindGroup(this.texA, this.texB);
+    this.bindB = this.makeBindGroup(this.texB, this.texA);
+    this.updateRenderBind();
+
+    // Mouse events
+    this.setupMouse(canvas, gridSize);
+
+    // Start loop
+    this.startLoop(gridSize);
+  }
+
+  updateWeights(flatWeights: number[]) {
+    const buffer = new Float32Array(flatWeights);
+    this.device.queue.writeBuffer(this.weightBuffer, 0, buffer);
+  }
+
+  private createWeights(): GPUBuffer {
+    const outputChannels = 3;
+    const inputChannels = 3;
+    const kernelSize = 5;
+    const weightsPerFilter = kernelSize * kernelSize;
+    const totalWeights = outputChannels * inputChannels * weightsPerFilter;
+    const weights = new Float32Array(totalWeights);
+
+    for (let i = 0; i < totalWeights; i++) {
+      weights[i] = 1.0;
+    }
+
+    const buffer = this.device.createBuffer({
+      size: weights.byteLength,
+      usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
+      mappedAtCreation: true,
+    });
+
+    new Float32Array(buffer.getMappedRange()).set(weights);
+    buffer.unmap();
+
+    this.weightBuffer = buffer;
+    return buffer;
+  }
+
+  private createTexture(size: [number, number]): GPUTexture {
+    return this.device.createTexture({
+      size: [...size, 1], format: this.format,
+      usage: GPUTextureUsage.TEXTURE_BINDING |
+             GPUTextureUsage.STORAGE_BINDING |
+             GPUTextureUsage.COPY_DST,
+    });
+  }
+
+  private async createComputePipeline(path: string): Promise<GPUComputePipeline> {
+    const code = await (await fetch(path)).text();
+    const module = this.device.createShaderModule({ code });
+    return this.device.createComputePipeline({ layout: 'auto', compute: { module, entryPoint: 'main' } });
+  }
+
+  private async createRenderPipeline(path: string): Promise<GPURenderPipeline> {
+    const code = await (await fetch(path)).text();
+    const module = this.device.createShaderModule({ code });
+    return this.device.createRenderPipeline({
+      layout: 'auto',
+      vertex: { module, entryPoint: 'vs' },
+      fragment: { module, entryPoint: 'fs', targets: [{ format: this.format }] },
+      primitive: { topology: 'triangle-strip' },
+    });
+  }
+
+  private makeBindGroup(src: GPUTexture, dst: GPUTexture): GPUBindGroup {
+    return this.device.createBindGroup({
+      layout: this.computePipeline.getBindGroupLayout(0),
+      entries: [
+        { binding: 0, resource: src.createView() },
+        { binding: 1, resource: dst.createView() },
+        { binding: 2, resource: { buffer: this.weightBuffer } },
+      ],
+    });
+  }
+
+  private updateRenderBind(): void {
+    this.renderBind = this.device.createBindGroup({
+      layout: this.renderPipeline.getBindGroupLayout(0),
+      entries: [
+        { binding: 0, resource: this.texB.createView() },
+        { binding: 1, resource: this.sampler },
+      ],
+    });
+  }
+
+  private setupMouse(canvas: HTMLCanvasElement, gridSize: [number, number]) {
+    canvas.addEventListener('mousedown', (e) => {
+      this.drawing = true;
+      const [gx, gy] = this.canvasToGrid(e, canvas, gridSize);
+      this.paintCell(gx, gy);
+    });
+    canvas.addEventListener('mouseup',   () => (this.drawing = false));
+    canvas.addEventListener('mouseleave',() => (this.drawing = false));
+    canvas.addEventListener('mousemove', (e) => {
+      if (!this.drawing) return;
+      const [gx, gy] = this.canvasToGrid(e, canvas, gridSize);
+      this.paintCell(gx, gy);
+    });
+  }
+
+  private canvasToGrid(evt: MouseEvent, canvas: HTMLCanvasElement, size: [number, number]): [number, number] {
+    const rect = canvas.getBoundingClientRect();
+    const x = (evt.clientX - rect.left) * (size[0] / rect.width);
+    const y = (evt.clientY - rect.top)  * (size[1] / rect.height);
+    return [Math.floor(x), Math.floor(y)];
+  }
+
+  private paintCell(gx: number, gy: number): void {
+    const alive = new Uint8Array([255,255,255,255]);
+    for (let dx=-this.brushRadius; dx<=this.brushRadius; dx++) {
+      for (let dy=-this.brushRadius; dy<=this.brushRadius; dy++) {
+        const x = Math.max(0, Math.min(this.config.gridSize[0]-1, gx+dx));
+        const y = Math.max(0, Math.min(this.config.gridSize[1]-1, gy+dy));
+        this.device.queue.writeTexture(
+          { texture: this.texA, origin: [x,y,0] },
+          alive,
+          { bytesPerRow: 4, rowsPerImage: 1 },
+          [1,1,1]
+        );
+      }
+    }
+  }
+
+  private startLoop([w,h]: [number, number]) {
+    const frame = () => {
+      // Compute
+      const encC = this.device.createCommandEncoder();
+      const passC = encC.beginComputePass();
+      passC.setPipeline(this.computePipeline);
+      passC.setBindGroup(0, this.bindA);
+      passC.dispatchWorkgroups(w/16, h/16);
+      passC.end();
+      this.device.queue.submit([encC.finish()]);
+
+      // Render
+      const encR = this.device.createCommandEncoder();
+      const passR = encR.beginRenderPass({ colorAttachments: [{ view: this.context.getCurrentTexture().createView(), loadOp:'clear', storeOp:'store' }] });
+      passR.setPipeline(this.renderPipeline);
+      passR.setBindGroup(0, this.renderBind);
+      passR.draw(4);
+      passR.end();
+      this.device.queue.submit([encR.finish()]);
+
+      // Ping-pong
+      [this.texA, this.texB] = [this.texB, this.texA];
+      [this.bindA, this.bindB] = [this.bindB, this.bindA];
+      this.updateRenderBind();
+
+      this.animationId = requestAnimationFrame(frame);
+    };
+    frame();
+  }
+
+  destroy(): void {
+    cancelAnimationFrame(this.animationId);
+  }
+}
