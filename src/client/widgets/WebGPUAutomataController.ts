@@ -1,7 +1,9 @@
+import computeShaderCode from '../../shaders/compute.wgsl?raw';
+import renderShaderCode from '../../shaders/render.wgsl?raw';
+
 // src/controllers/WebGPUNeuralAutomataController.ts
 export interface AutomataConfig {
   canvas: HTMLCanvasElement;
-  shaderPath: string;
   gridSize: [number, number];
   brushRadius?: number;
 }
@@ -31,7 +33,7 @@ export class WebGPUNeuralAutomataController {
   }
 
   async init(): Promise<void> {
-    const { canvas, shaderPath, gridSize } = this.config;
+    const { canvas, gridSize } = this.config;
     if (!navigator.gpu) throw new Error('WebGPU not supported');
     const adapter = await navigator.gpu.requestAdapter();
     this.device = await adapter!.requestDevice();
@@ -47,8 +49,8 @@ export class WebGPUNeuralAutomataController {
     this.weightBuffer = this.createWeights();
 
     // Pipelines
-    this.computePipeline = await this.createComputePipeline(`${shaderPath}compute.wgsl`);
-    this.renderPipeline  = await this.createRenderPipeline(`${shaderPath}render.wgsl`);
+    this.computePipeline = await this.createComputePipeline(computeShaderCode);
+    this.renderPipeline  = await this.createRenderPipeline(renderShaderCode);
 
     // Bind groups
     this.bindA = this.makeBindGroup(this.texA, this.texB);
@@ -137,14 +139,12 @@ export class WebGPUNeuralAutomataController {
     });
   }
 
-  private async createComputePipeline(path: string): Promise<GPUComputePipeline> {
-    const code = await (await fetch(path)).text();
+  private async createComputePipeline(code: string): Promise<GPUComputePipeline> {
     const module = this.device.createShaderModule({ code });
     return this.device.createComputePipeline({ layout: 'auto', compute: { module, entryPoint: 'main' } });
   }
 
-  private async createRenderPipeline(path: string): Promise<GPURenderPipeline> {
-    const code = await (await fetch(path)).text();
+  private async createRenderPipeline(code: string): Promise<GPURenderPipeline> {
     const module = this.device.createShaderModule({ code });
     return this.device.createRenderPipeline({
       layout: 'auto',

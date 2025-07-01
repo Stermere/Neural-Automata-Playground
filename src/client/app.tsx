@@ -3,9 +3,8 @@ import styles from './app.module.css';
 import { WebGPUNeuralAutomataController, AutomataConfig } from './widgets/WebGPUAutomataController.ts';
 import WeightEditor from './widgets/WeightEditor.tsx';
 import CanvasControl from './widgets/CanvasControl.tsx';
-import { wave, gameOfLife, worms, matrix, matrix2 } from './constants/defaultWeights.ts';
+import { wave, gameOfLife, worms, matrix, organicMatrix, fire, neonWave, galacticGoo } from './constants/defaultWeights.ts';
 
-const SHADER_PATH = '/src/shaders/';
 const SIZE: [number, number] = [1024, 1024];
 
 export default function WebGPUNeuralAutomata(): JSX.Element {
@@ -24,7 +23,6 @@ export default function WebGPUNeuralAutomata(): JSX.Element {
 
     const config: AutomataConfig = {
       canvas,
-      shaderPath: SHADER_PATH,
       gridSize: SIZE,
       brushRadius: 20,
     };
@@ -46,7 +44,10 @@ export default function WebGPUNeuralAutomata(): JSX.Element {
     localStorage.setItem('weights:wave', JSON.stringify(wave));
     localStorage.setItem('weights:worms', JSON.stringify(worms));
     localStorage.setItem('weights:matrix', JSON.stringify(matrix));
-    localStorage.setItem('weights:matrix2', JSON.stringify(matrix2));
+    localStorage.setItem('weights:organicMatrix', JSON.stringify(organicMatrix));
+    localStorage.setItem('weights:fire', JSON.stringify(fire));
+    localStorage.setItem('weights:neonWave', JSON.stringify(neonWave));
+    localStorage.setItem('weights:galacticGoo', JSON.stringify(galacticGoo));
     localStorage.setItem('weights:gameOfLife', JSON.stringify(gameOfLife));
   }, []);
 

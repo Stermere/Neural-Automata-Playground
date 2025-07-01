@@ -1,6 +1,7 @@
 {
   "name": "computeshaders",
-  "version": "1.0.0",
+  "version": "0.0.1",
+  "homepage": "https://Stermere.github.io/Neural-Automata-Playground",
   "main": "index.js",
   "type": "module",
   "scripts": {
@@ -8,7 +9,9 @@
     "start": "lite-server",
     "dev": "vite",
     "build": "vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "predeploy": "npm run build",
+    "deploy": "gh-pages -d dist"
   },
   "keywords": [],
   "author": "",
@@ -23,6 +26,7 @@
   "devDependencies": {
     "@types/react": "^19.1.8",
     "@vitejs/plugin-react": "^4.6.0",
+    "gh-pages": "^6.3.0",
     "vite": "^7.0.0"
   }
 }
