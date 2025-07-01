@@ -41,7 +41,7 @@ export default function WeightEditor({ initialWeights, onChange }: WeightEditorP
   const handleNoise = (outIdx: number, inIdx: number) => {
     const newWeights = structuredClone(weights);
     newWeights[outIdx][inIdx] = newWeights[outIdx][inIdx].map(r =>
-      r.map(v => v + (Math.random() * 0.2 - 0.1))
+      r.map(v => v + (Math.random() * 2.0 - 1.0))
     );
     notifyChange(newWeights);
   };
