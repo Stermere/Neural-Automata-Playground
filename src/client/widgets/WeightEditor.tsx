@@ -1,24 +1,17 @@
-import React, { useState } from 'react';
-import styles from './weightEditor.module.css';
-import WeightConfig from './WeightConfig';
+import { useState } from 'react';
+import styles from './styles/weightEditor.module.css';
 
 type Weights3D = number[][][][];
 
 interface WeightEditorProps {
-  initialWeights: Weights3D;
-  onChange?: (weights: Weights3D) => void;
+  weights: Weights3D;
+  onWeightUpdate: (weights: Weights3D) => void;
 }
 
-const channelLabels = ['R', 'G', 'B'];
+const channelLabels = ['Red', 'Green', 'Blue'];
 
-export default function WeightEditor({ initialWeights, onChange }: WeightEditorProps) {
-  const [weights, setWeights] = useState<Weights3D>(initialWeights);
+export default function WeightEditor({ weights, onWeightUpdate }: WeightEditorProps) {
   const [copySrc, setCopySrc] = useState<string>('0-0');
-
-  const notifyChange = (newW: Weights3D) => {
-    setWeights(newW);
-    onChange?.(newW);
-  };
 
   const handleChange = (
     outIdx: number,
@@ -29,13 +22,13 @@ export default function WeightEditor({ initialWeights, onChange }: WeightEditorP
   ) => {
     const newWeights = structuredClone(weights);
     newWeights[outIdx][inIdx][row][col] = value;
-    notifyChange(newWeights);
+    onWeightUpdate(newWeights);
   };
 
   const handleClear = (outIdx: number, inIdx: number) => {
     const newWeights = structuredClone(weights);
     newWeights[outIdx][inIdx] = newWeights[outIdx][inIdx].map(r => r.map(_ => 0));
-    notifyChange(newWeights);
+    onWeightUpdate(newWeights);
   };
 
   const handleNoise = (outIdx: number, inIdx: number) => {
@@ -43,7 +36,7 @@ export default function WeightEditor({ initialWeights, onChange }: WeightEditorP
     newWeights[outIdx][inIdx] = newWeights[outIdx][inIdx].map(r =>
       r.map(v => v + (Math.random() * 2.0 - 1.0))
     );
-    notifyChange(newWeights);
+    onWeightUpdate(newWeights);
   };
 
   const handleCopy = (destKey: string) => {
@@ -52,7 +45,7 @@ export default function WeightEditor({ initialWeights, onChange }: WeightEditorP
     if (copySrc === destKey) return;
     const newWeights = structuredClone(weights);
     newWeights[dOut][dIn] = structuredClone(newWeights[sOut][sIn]);
-    notifyChange(newWeights);
+    onWeightUpdate(newWeights);
   };
 
   // prepare copy sources list
@@ -124,21 +117,18 @@ export default function WeightEditor({ initialWeights, onChange }: WeightEditorP
             </div>
           </div>
         ))}
-        <div className={styles.controlContainer}>
-          <div className={styles.copyContainer}>
-            <label className={styles.label} htmlFor="copySrc">Copy From:</label>
-            <select
-              id="copySrc"
-              className={styles.select}
-              value={copySrc}
-              onChange={e => setCopySrc(e.target.value)}
-            >
-              {copyOptions.map(opt => (
-                <option key={opt.key} value={opt.key}>{opt.label}</option>
-              ))}
-            </select>
-          </div>
-          <WeightConfig weights={weights} onLoad={notifyChange} />
+        <div className={styles.copyContainer}>
+          <label className={styles.label} htmlFor="copySrc">Copy From:</label>
+          <select
+            id="copySrc"
+            className={styles.select}
+            value={copySrc}
+            onChange={e => setCopySrc(e.target.value)}
+          >
+            {copyOptions.map(opt => (
+              <option key={opt.key} value={opt.key}>{opt.label}</option>
+            ))}
+          </select>
         </div>
       </div>
     </div>

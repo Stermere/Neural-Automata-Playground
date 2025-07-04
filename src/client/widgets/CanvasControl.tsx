@@ -1,5 +1,4 @@
-import React from 'react';
-import styles from './canvasControl.module.css';
+import styles from './styles/canvasControl.module.css';
 
 interface CanvasControlProps {
   onClear: (() => void) | undefined;

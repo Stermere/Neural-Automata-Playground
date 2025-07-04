@@ -23,10 +23,8 @@ fn wrapCoord(x: i32, y: i32) -> vec2<i32> {
   return vec2<i32>(ix, iy);
 }
 
-// Activation function (ReLU for now)
-fn activate(x: f32) -> f32 {
-  return select(exp(x) - 1.0, x, x >= 0.0);
-}
+// Activation function placholder
+@activationFunction
 
 // Get weight from flat array
 fn getWeight(outCh: u32, inCh: u32, kernelIndex: u32) -> f32 {

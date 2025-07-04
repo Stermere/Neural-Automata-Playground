@@ -4,6 +4,10 @@ import { WebGPUNeuralAutomataController, AutomataConfig } from './widgets/WebGPU
 import WeightEditor from './widgets/WeightEditor.tsx';
 import CanvasControl from './widgets/CanvasControl.tsx';
 import { wave, gameOfLife, worms, matrix, organicMatrix, fire, neonWave, galacticGoo } from './constants/defaultWeights.ts';
+import NeuralAutomataConfig from './widgets/NeuralAutomataConfig.tsx';
+import ContentSwitcher from './widgets/ContentSwitcher.tsx';
+import ActivationEditor from './widgets/ActivationEditor.tsx';
+import { elu } from './constants/defaultActivations.ts';
 
 const SIZE: [number, number] = [1024, 1024];
 
@@ -11,8 +15,10 @@ export default function WebGPUNeuralAutomata(): JSX.Element {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const controllerRef = useRef<WebGPUNeuralAutomataController | null>(null);
   const initialized = useRef(false);
+  const initialWeights = neonWave
 
-  const [weights, setWeights] = useState(wave);
+  const [weights, setWeights] = useState(initialWeights);
+  const [activationCode, setActivationCode] = useState(elu);
 
   useEffect(() => {
     if (initialized.current) return;
@@ -30,9 +36,11 @@ export default function WebGPUNeuralAutomata(): JSX.Element {
     const controller = new WebGPUNeuralAutomataController(config);
     controllerRef.current = controller;
 
-    controller.init().then(() => {
-      const flatWeights = wave.flat(3);
+    controller.init().then(async () => {
+      const flatWeights = initialWeights.flat(3);
       controller.updateWeights(flatWeights);
+      controller.randomizeCanvas();
+
     }).catch(console.error);
 
     return () => {
@@ -51,11 +59,20 @@ export default function WebGPUNeuralAutomata(): JSX.Element {
     localStorage.setItem('weights:gameOfLife', JSON.stringify(gameOfLife));
   }, []);
 
+  const handleConfigLoad = (updatedWeights: number[][][][], updatedActivation: string) => {
+    handleWeightChange(updatedWeights);
+    handleActivationChange(updatedActivation);
+  };
+
   const handleWeightChange = (updatedWeights: number[][][][]) => {
     setWeights(updatedWeights);
-    const flatWeights = updatedWeights.flat(3);
-    controllerRef.current?.updateWeights(flatWeights);
+    controllerRef.current?.updateWeights(updatedWeights.flat(3));
   };
+
+  const handleActivationChange = (updatedActivationCode: string) => {
+    setActivationCode(updatedActivationCode)
+    controllerRef.current?.setActivationFunction(updatedActivationCode)
+  }
 
   return (
     <div className={styles.canvasContainer}>
@@ -70,11 +87,18 @@ export default function WebGPUNeuralAutomata(): JSX.Element {
           onClear={() => controllerRef.current?.clearCanvas()}
           onRandomize={() => controllerRef.current?.randomizeCanvas()}
         />
-        <WeightEditor
-          initialWeights={weights}
-          onChange={handleWeightChange}
-        />
-        {/* TODO create an activation function editor + config */}
+        <NeuralAutomataConfig weights={weights} activationCode={activationCode} onLoad={handleConfigLoad} />
+
+        <ContentSwitcher labels={['Weight Editor', 'Activation Editor']}>
+          <WeightEditor
+            weights={weights}
+            onWeightUpdate={handleWeightChange}
+          />
+          <ActivationEditor
+            code={activationCode}
+            onCodeChange={handleActivationChange}
+          />
+        </ContentSwitcher>
       </div>
     </div>
   );

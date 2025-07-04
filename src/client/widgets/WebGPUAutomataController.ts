@@ -1,5 +1,6 @@
 import computeShaderCode from '../../shaders/compute.wgsl?raw';
 import renderShaderCode from '../../shaders/render.wgsl?raw';
+import { elu } from '../constants/defaultActivations';
 
 // src/controllers/WebGPUNeuralAutomataController.ts
 export interface AutomataConfig {
@@ -28,6 +29,9 @@ export class WebGPUNeuralAutomataController {
   private drawing = false;
   private brushRadius: number;
 
+  private baseShaderCode = computeShaderCode;
+  private activationCode = elu;
+
   constructor(private config: AutomataConfig) {
     this.brushRadius = config.brushRadius ?? 20;
   }
@@ -49,7 +53,7 @@ export class WebGPUNeuralAutomataController {
     this.weightBuffer = this.createWeights();
 
     // Pipelines
-    this.computePipeline = await this.createComputePipeline(computeShaderCode);
+    this.computePipeline = await this.createComputePipeline(this.buildComputeShaderCode());
     this.renderPipeline  = await this.createRenderPipeline(renderShaderCode);
 
     // Bind groups
@@ -67,6 +71,11 @@ export class WebGPUNeuralAutomataController {
   updateWeights(flatWeights: number[]) {
     const buffer = new Float32Array(flatWeights);
     this.device.queue.writeBuffer(this.weightBuffer, 0, buffer);
+  }
+
+  setActivationFunction(code: string) {
+    this.activationCode = code;
+    this.recompileComputePipeline();
   }
 
   clearCanvas(): void {
@@ -152,6 +161,20 @@ export class WebGPUNeuralAutomataController {
       fragment: { module, entryPoint: 'fs', targets: [{ format: this.format }] },
       primitive: { topology: 'triangle-strip' },
     });
+  }
+
+  private async recompileComputePipeline() {
+    this.computePipeline = await this.createComputePipeline(this.buildComputeShaderCode());
+    this.bindA = this.makeBindGroup(this.texA, this.texB);
+    this.bindB = this.makeBindGroup(this.texB, this.texA);
+  }
+
+  // fills in variable segments of the compute shader 
+  private buildComputeShaderCode(): string {
+    return this.baseShaderCode.replace(
+      '@activationFunction',
+      this.activationCode
+    );
   }
 
   private makeBindGroup(src: GPUTexture, dst: GPUTexture): GPUBindGroup {

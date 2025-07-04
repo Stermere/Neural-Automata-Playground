@@ -1,12 +1,13 @@
 import React, { useState, useRef, useEffect } from 'react';
-import styles from './weightConfig.module.css';
+import styles from './styles/neuralAutomataConfig.module.css';
 
-interface WeightConfig {
+interface NeuralAutomataConfig {
   weights: number[][][][];
-  onLoad: (weights: number[][][][]) => void;
+  activationCode: string
+  onLoad: (weights: number[][][][], activationCode: string) => void;
 }
 
-export default function WeightConfig({ weights, onLoad }: WeightConfig) {
+export default function NeuralAutomataConfig({ weights, activationCode, onLoad }: NeuralAutomataConfig) {
   const [filename, setFilename] = useState('');
   const [selected, setSelected] = useState("");
   const [savedFiles, setSavedFiles] = useState<string[]>([]);
@@ -18,20 +19,30 @@ export default function WeightConfig({ weights, onLoad }: WeightConfig) {
   }, []);
 
   const handleSave = () => {
-    localStorage.setItem(`weights:${filename}`, JSON.stringify(weights));
-    if (!savedFiles.includes(filename)) {
-      setSavedFiles(prev => [...prev, filename]);
+    const writenFilename = (filename.length === 0) ? 'NoName' : filename;
+    const data = {
+      weights,
+      activationCode,
+    };
+    localStorage.setItem(`weights:${writenFilename}`, JSON.stringify(data));
+    if (!savedFiles.includes(writenFilename)) {
+      setSavedFiles(prev => [...prev, writenFilename]);
     }
   };
 
   const handleLoad = (name: string) => {
     setSelected("");
-
     const data = localStorage.getItem(`weights:${name}`);
     if (!data) return;
+
     try {
       const parsed = JSON.parse(data);
-      onLoad(parsed);
+      if (Array.isArray(parsed)) {
+        // legacy support: just weights TODO migrate defaults
+        onLoad(parsed, activationCode);
+      } else {
+        onLoad(parsed.weights, parsed.activationCode || '');
+      }
     } catch (err) {
       console.error('Failed to parse weights:', err);
     }
@@ -44,7 +55,11 @@ export default function WeightConfig({ weights, onLoad }: WeightConfig) {
     reader.onload = () => {
       try {
         const data = JSON.parse(reader.result as string);
-        onLoad(data);
+        if (Array.isArray(data)) {
+          onLoad(data, activationCode);
+        } else {
+          onLoad(data.weights, data.activationCode || '');
+        }
       } catch (err) {
         console.error('Failed to load weights:', err);
       }
@@ -53,11 +68,14 @@ export default function WeightConfig({ weights, onLoad }: WeightConfig) {
   };
 
   const handleExport = () => {
-    const blob = new Blob([JSON.stringify(weights, null, 2)], { type: 'application/json' });
+    const blob = new Blob(
+      [JSON.stringify({ weights, activationCode }, null, 2)],
+      { type: 'application/json' }
+    );
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `${filename || 'weights'}.json`;
+    a.download = `${filename || 'config'}.json`;
     a.click();
     URL.revokeObjectURL(url);
   };
