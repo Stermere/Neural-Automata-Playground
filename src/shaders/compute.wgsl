@@ -77,9 +77,9 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     }
   }
 
-  let outR = activate(sumR / max(totalWeightR, 1e-5));
-  let outG = activate(sumG / max(totalWeightG, 1e-5));
-  let outB = activate(sumB / max(totalWeightB, 1e-5));
+  let outR = activation(sumR, totalWeightR);
+  let outG = activation(sumG, totalWeightG);
+  let outB = activation(sumB, totalWeightB);
 
   textureStore(dst, vec2<u32>(gid.xy), vec4<f32>(outR, outG, outB, 1.0));
 }

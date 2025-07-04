@@ -1,5 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
 import styles from './styles/neuralAutomataConfig.module.css';
+import { DEFAULT_EXPORT_NAME, LOCAL_STORAGE_CONFIG_NAME } from '../constants/filenameConstants';
 
 interface NeuralAutomataConfig {
   weights: number[][][][];
@@ -14,35 +15,30 @@ export default function NeuralAutomataConfig({ weights, activationCode, onLoad }
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
-    const existing = Object.keys(localStorage).filter(key => key.startsWith('weights:')).map(k => k.slice(8));
+    const existing = Object.keys(localStorage).filter(key => key.startsWith(LOCAL_STORAGE_CONFIG_NAME)).map(k => k.slice(LOCAL_STORAGE_CONFIG_NAME.length));
     setSavedFiles(existing);
   }, []);
 
   const handleSave = () => {
-    const writenFilename = (filename.length === 0) ? 'NoName' : filename;
+    const writenFilename = (filename.length === 0) ? DEFAULT_EXPORT_NAME : filename;
     const data = {
       weights,
       activationCode,
     };
-    localStorage.setItem(`weights:${writenFilename}`, JSON.stringify(data));
+    localStorage.setItem(`${LOCAL_STORAGE_CONFIG_NAME}${writenFilename}`, JSON.stringify(data));
     if (!savedFiles.includes(writenFilename)) {
       setSavedFiles(prev => [...prev, writenFilename]);
     }
   };
 
   const handleLoad = (name: string) => {
-    setSelected("");
-    const data = localStorage.getItem(`weights:${name}`);
+    setSelected("")
+    const data = localStorage.getItem(`${LOCAL_STORAGE_CONFIG_NAME}${name}`);
     if (!data) return;
 
     try {
       const parsed = JSON.parse(data);
-      if (Array.isArray(parsed)) {
-        // legacy support: just weights TODO migrate defaults
-        onLoad(parsed, activationCode);
-      } else {
-        onLoad(parsed.weights, parsed.activationCode || '');
-      }
+      onLoad(parsed.weights, parsed.activationCode);
     } catch (err) {
       console.error('Failed to parse weights:', err);
     }

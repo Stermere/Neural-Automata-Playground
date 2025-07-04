@@ -1,4 +1,10 @@
+export const linear = `
+fn activate(sum: f32, weightSum: f32) -> f32 {
+    return sum;
+}`;
+
 export const elu = `
-fn activate(x: f32) -> f32 {
-    return select(exp(x) - 1.0, x, x >= 0.0);
+fn activate(sum: f32, weightSum: f32) -> f32 {
+    let norm = sum / max(weightSum, 1e-5);
+    return select(exp(norm) - 1.0, norm, norm >= 0.0);
 }`;

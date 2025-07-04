@@ -1,13 +1,13 @@
 import { JSX, useEffect, useRef, useState } from 'react';
 import styles from './app.module.css';
-import { WebGPUNeuralAutomataController, AutomataConfig } from './widgets/WebGPUAutomataController.ts';
+import { WebGPUNeuralAutomataController, AutomataConfig } from './controllers/WebGPUAutomataController.ts';
 import WeightEditor from './widgets/WeightEditor.tsx';
 import CanvasControl from './widgets/CanvasControl.tsx';
-import { wave, gameOfLife, worms, matrix, organicMatrix, fire, neonWave, galacticGoo } from './constants/defaultWeights.ts';
 import NeuralAutomataConfig from './widgets/NeuralAutomataConfig.tsx';
 import ContentSwitcher from './widgets/ContentSwitcher.tsx';
 import ActivationEditor from './widgets/ActivationEditor.tsx';
-import { elu } from './constants/defaultActivations.ts';
+import { DefaultConfigController } from './controllers/DefaultConfigController.ts';
+import { LOCAL_STORAGE_CONFIG_NAME } from './constants/filenameConstants.ts';
 
 const SIZE: [number, number] = [1024, 1024];
 
@@ -15,10 +15,10 @@ export default function WebGPUNeuralAutomata(): JSX.Element {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const controllerRef = useRef<WebGPUNeuralAutomataController | null>(null);
   const initialized = useRef(false);
-  const initialWeights = neonWave
+  const initialConfig = DefaultConfigController.getDefault()
 
-  const [weights, setWeights] = useState(initialWeights);
-  const [activationCode, setActivationCode] = useState(elu);
+  const [weights, setWeights] = useState(initialConfig.weights);
+  const [activationCode, setActivationCode] = useState(initialConfig.activationCode);
 
   useEffect(() => {
     if (initialized.current) return;
@@ -37,10 +37,11 @@ export default function WebGPUNeuralAutomata(): JSX.Element {
     controllerRef.current = controller;
 
     controller.init().then(async () => {
-      const flatWeights = initialWeights.flat(3);
+      const flatWeights = initialConfig.weights.flat(3);
+      const activation = initialConfig.activationCode
       controller.updateWeights(flatWeights);
+      controller.setActivationFunction(activation)
       controller.randomizeCanvas();
-
     }).catch(console.error);
 
     return () => {
@@ -49,14 +50,9 @@ export default function WebGPUNeuralAutomata(): JSX.Element {
   }, []);
 
   useEffect(() => {
-    localStorage.setItem('weights:wave', JSON.stringify(wave));
-    localStorage.setItem('weights:worms', JSON.stringify(worms));
-    localStorage.setItem('weights:matrix', JSON.stringify(matrix));
-    localStorage.setItem('weights:organicMatrix', JSON.stringify(organicMatrix));
-    localStorage.setItem('weights:fire', JSON.stringify(fire));
-    localStorage.setItem('weights:neonWave', JSON.stringify(neonWave));
-    localStorage.setItem('weights:galacticGoo', JSON.stringify(galacticGoo));
-    localStorage.setItem('weights:gameOfLife', JSON.stringify(gameOfLife));
+    for (const [name, config] of Object.entries(DefaultConfigController.configMap)) {
+      localStorage.setItem(`${LOCAL_STORAGE_CONFIG_NAME}${name}`, JSON.stringify(config));
+    }
   }, []);
 
   const handleConfigLoad = (updatedWeights: number[][][][], updatedActivation: string) => {
