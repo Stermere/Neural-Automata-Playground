@@ -8,6 +8,8 @@ import ContentSwitcher from './widgets/ContentSwitcher.tsx';
 import ActivationEditor from './widgets/ActivationEditor.tsx';
 import { DefaultConfigController } from './controllers/DefaultConfigController.ts';
 import { LOCAL_STORAGE_CONFIG_NAME } from './constants/filenameConstants.ts';
+import { BASE_ACTIVATIONS } from './constants/baseActivations.ts';
+import NeuralAutomataIntroduction from './widgets/NeuralAutomataIntroduction.tsx';
 
 const SIZE: [number, number] = [1024, 1024];
 
@@ -85,7 +87,8 @@ export default function WebGPUNeuralAutomata(): JSX.Element {
         />
         <NeuralAutomataConfig weights={weights} activationCode={activationCode} onLoad={handleConfigLoad} />
 
-        <ContentSwitcher labels={['Weight Editor', 'Activation Editor']}>
+        <ContentSwitcher labels={['Explanation', 'Weight Editor', 'Activation Editor']}>
+          <NeuralAutomataIntroduction />
           <WeightEditor
             weights={weights}
             onWeightUpdate={handleWeightChange}
@@ -93,6 +96,7 @@ export default function WebGPUNeuralAutomata(): JSX.Element {
           <ActivationEditor
             code={activationCode}
             onCodeChange={handleActivationChange}
+            presets={BASE_ACTIVATIONS}
           />
         </ContentSwitcher>
       </div>

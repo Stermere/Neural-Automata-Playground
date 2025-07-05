@@ -48,3 +48,12 @@
 .button:hover {
   background-color: #505050;
 }
+
+.select {
+  padding: 0.4rem;
+  border-radius: 6px;
+  background-color: #3a3a3a;
+  color: white;
+  border: none;
+  font-size: 0.9rem;
+}

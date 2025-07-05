@@ -10,7 +10,7 @@ interface NeuralAutomataConfig {
 
 export default function NeuralAutomataConfig({ weights, activationCode, onLoad }: NeuralAutomataConfig) {
   const [filename, setFilename] = useState('');
-  const [selected, setSelected] = useState("");
+  const [selected, setSelected] = useState('');
   const [savedFiles, setSavedFiles] = useState<string[]>([]);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -20,15 +20,23 @@ export default function NeuralAutomataConfig({ weights, activationCode, onLoad }
   }, []);
 
   const handleSave = () => {
-    const writenFilename = (filename.length === 0) ? DEFAULT_EXPORT_NAME : filename;
+    let baseFilename = (filename.length === 0) ? DEFAULT_EXPORT_NAME : filename;
+    let writenFilename = baseFilename;
+    let counter = 1;
+
+    // Check for existing filename and append a number if needed
+    while (savedFiles.includes(writenFilename)) {
+      writenFilename = `${baseFilename} (${counter})`;
+      counter++;
+    }
+
     const data = {
       weights,
       activationCode,
     };
+
     localStorage.setItem(`${LOCAL_STORAGE_CONFIG_NAME}${writenFilename}`, JSON.stringify(data));
-    if (!savedFiles.includes(writenFilename)) {
-      setSavedFiles(prev => [...prev, writenFilename]);
-    }
+    setSavedFiles(prev => [...prev, writenFilename]);
   };
 
   const handleLoad = (name: string) => {
@@ -39,9 +47,17 @@ export default function NeuralAutomataConfig({ weights, activationCode, onLoad }
     try {
       const parsed = JSON.parse(data);
       onLoad(parsed.weights, parsed.activationCode);
+      setFilename(name);
     } catch (err) {
       console.error('Failed to parse weights:', err);
     }
+  };
+
+  const handleDelete = () => {
+    if (!filename || !savedFiles.includes(filename)) return;
+    localStorage.removeItem(`${LOCAL_STORAGE_CONFIG_NAME}${filename}`);
+    setSavedFiles(prev => prev.filter(name => name !== filename));
+    setFilename('');
   };
 
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -78,6 +94,7 @@ export default function NeuralAutomataConfig({ weights, activationCode, onLoad }
 
   return (
     <div className={styles.container}>
+      <h2 className={styles.label}>Profile Managment</h2>
       <input
         className={styles.input}
         value={filename}
@@ -88,6 +105,12 @@ export default function NeuralAutomataConfig({ weights, activationCode, onLoad }
         <button className={styles.btn} onClick={handleSave}>Save</button>
         <button className={styles.btn} onClick={handleExport}>Export</button>
         <button className={styles.btn} onClick={() => fileInputRef.current?.click()}>import</button>
+        <button
+          className={styles.btn}
+          onClick={handleDelete}
+        >
+          Delete
+        </button>
       </div>
       <input
         type="file"

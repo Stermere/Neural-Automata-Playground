@@ -13,6 +13,7 @@ export default function CanvasControl({
 }: CanvasControlProps) {
   return (
     <div className={styles.controlContainer}>
+      <h2 className={styles.label}>Canvas Controls</h2>
       <button
         className={styles.btn}
         onClick={onClear}

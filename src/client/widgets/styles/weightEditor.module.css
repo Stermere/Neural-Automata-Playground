@@ -44,6 +44,12 @@
   display: flex;
 }
 
+.kernelHeader {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
 .weightInput {
   width: 3rem;
   padding: 0.25rem;

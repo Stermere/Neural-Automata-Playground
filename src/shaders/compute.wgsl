@@ -26,6 +26,10 @@ fn wrapCoord(x: i32, y: i32) -> vec2<i32> {
 // Activation function placholder
 @activationFunction
 
+fn activationClamped(x: f32, weightSum: f32) -> f32 {
+  return clamp(activation(x, weightSum), 0.0, 1.0);
+}
+
 // Get weight from flat array
 fn getWeight(outCh: u32, inCh: u32, kernelIndex: u32) -> f32 {
   return weightBuffer[outCh * 75u + inCh * 25u + kernelIndex];
@@ -77,9 +81,9 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     }
   }
 
-  let outR = activation(sumR, totalWeightR);
-  let outG = activation(sumG, totalWeightG);
-  let outB = activation(sumB, totalWeightB);
+  let outR = activationClamped(sumR, totalWeightR);
+  let outG = activationClamped(sumG, totalWeightG);
+  let outB = activationClamped(sumB, totalWeightB);
 
   textureStore(dst, vec2<u32>(gid.xy), vec4<f32>(outR, outG, outB, 1.0));
 }

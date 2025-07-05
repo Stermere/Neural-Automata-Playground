@@ -22,6 +22,13 @@
   color: white;
 }
 
+.label {
+  color: #cfcfcf;
+  font-size: 0.875rem;
+  margin: 0.5rem 0;
+  padding-right: 1rem;
+}
+
 .actionsRow {
   display: flex;
   flex-direction: row;
@@ -35,7 +42,7 @@
   padding: 0.4rem 0.8rem;
   border: none;
   border-radius: 6px;
-  background-color: #4a90e2;
+  background-color: #3a3a3a;
   color: white;
   font-weight: bold;
   cursor: pointer;
@@ -46,7 +53,7 @@
 }
 
 .btn:hover {
-  background-color: #357ab8;
+  background-color: #505050;
 }
 
 .select {

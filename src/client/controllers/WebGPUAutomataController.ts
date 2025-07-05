@@ -1,6 +1,6 @@
 import computeShaderCode from '../../shaders/compute.wgsl?raw';
 import renderShaderCode from '../../shaders/render.wgsl?raw';
-import { elu } from '../constants/defaultActivations';
+import { BASE_ACTIVATIONS } from '../constants/baseActivations';
 
 // src/controllers/WebGPUNeuralAutomataController.ts
 export interface AutomataConfig {
@@ -30,7 +30,7 @@ export class WebGPUNeuralAutomataController {
   private brushRadius: number;
 
   private baseShaderCode = computeShaderCode;
-  private activationCode = elu;
+  private activationCode = BASE_ACTIVATIONS.Linear;
 
   constructor(private config: AutomataConfig) {
     this.brushRadius = config.brushRadius ?? 20;
@@ -199,25 +199,61 @@ export class WebGPUNeuralAutomataController {
   }
 
   private setupMouse(canvas: HTMLCanvasElement, gridSize: [number, number]) {
-    canvas.addEventListener('mousedown', (e) => {
+    const getEventCoords = (event: MouseEvent | TouchEvent): [number, number] => {
+      let clientX: number, clientY: number;
+
+      if (event instanceof TouchEvent) {
+        const touch = event.touches[0] || event.changedTouches[0];
+        clientX = touch.clientX;
+        clientY = touch.clientY;
+      } else {
+        clientX = event.clientX;
+        clientY = event.clientY;
+      }
+
+      const rect = canvas.getBoundingClientRect();
+      const x = clientX - rect.left;
+      const y = clientY - rect.top;
+
+      return this.canvasToGrid(x, y, canvas, gridSize);
+    };
+
+    const handleStart = (e: MouseEvent | TouchEvent) => {
+      e.preventDefault?.();
       this.drawing = true;
-      const [gx, gy] = this.canvasToGrid(e, canvas, gridSize);
+      const [gx, gy] = getEventCoords(e);
       this.paintCell(gx, gy);
-    });
-    canvas.addEventListener('mouseup',   () => (this.drawing = false));
-    canvas.addEventListener('mouseleave',() => (this.drawing = false));
-    canvas.addEventListener('mousemove', (e) => {
+    };
+
+    const handleMove = (e: MouseEvent | TouchEvent) => {
       if (!this.drawing) return;
-      const [gx, gy] = this.canvasToGrid(e, canvas, gridSize);
+      e.preventDefault?.();
+      const [gx, gy] = getEventCoords(e);
       this.paintCell(gx, gy);
-    });
+    };
+
+    const handleEnd = () => {
+      this.drawing = false;
+    };
+
+    // Mouse events
+    canvas.addEventListener('mousedown', handleStart);
+    canvas.addEventListener('mousemove', handleMove);
+    canvas.addEventListener('mouseup', handleEnd);
+    canvas.addEventListener('mouseleave', handleEnd);
+
+    // Touch events
+    canvas.addEventListener('touchstart', handleStart, { passive: false });
+    canvas.addEventListener('touchmove', handleMove, { passive: false });
+    canvas.addEventListener('touchend', handleEnd);
+    canvas.addEventListener('touchcancel', handleEnd);
   }
 
-  private canvasToGrid(evt: MouseEvent, canvas: HTMLCanvasElement, size: [number, number]): [number, number] {
+  private canvasToGrid(x: number, y: number, canvas: HTMLCanvasElement, size: [number, number]): [number, number] {
     const rect = canvas.getBoundingClientRect();
-    const x = (evt.clientX - rect.left) * (size[0] / rect.width);
-    const y = (evt.clientY - rect.top)  * (size[1] / rect.height);
-    return [Math.floor(x), Math.floor(y)];
+    const gx = x * (size[0] / rect.width);
+    const gy = y * (size[1] / rect.height);
+    return [Math.floor(gx), Math.floor(gy)];
   }
 
   private paintCell(gx: number, gy: number): void {

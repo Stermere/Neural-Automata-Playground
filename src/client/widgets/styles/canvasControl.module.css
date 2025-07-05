@@ -9,13 +9,20 @@
   flex-direction: row !important;
   gap: 0.5rem;
   align-items: center;
-  margin-bottom: 0.5vw;
+  margin-bottom: 0.5rem;
   justify-content: center;
   max-width: 1024px;
 }
 
+.label {
+  color: #cfcfcf;
+  font-size: 0.875rem;
+  margin: 0.5rem 0;
+  padding-right: 1rem;
+}
+
 .btn {
-  background-color: #4a90e2;
+  background-color: #3a3a3a;
   color: #f1f1f1;
   border: none;
   padding: 0.5rem 1rem;
@@ -26,7 +33,7 @@
 }
 
 .btn:hover:enabled {
-  background-color: #357ab8;
+  background-color: #505050;
 }
 
 .btn:disabled {

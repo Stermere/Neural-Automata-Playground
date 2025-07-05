@@ -34,7 +34,7 @@ export default function WeightEditor({ weights, onWeightUpdate }: WeightEditorPr
   const handleNoise = (outIdx: number, inIdx: number) => {
     const newWeights = structuredClone(weights);
     newWeights[outIdx][inIdx] = newWeights[outIdx][inIdx].map(r =>
-      r.map(v => v + (Math.random() * 2.0 - 1.0))
+      r.map(v => v + (Math.random() * 0.2 - 0.1))
     );
     onWeightUpdate(newWeights);
   };
@@ -59,14 +59,14 @@ export default function WeightEditor({ weights, onWeightUpdate }: WeightEditorPr
       <div className={styles.editorContainer}>
         {weights.map((outputGroup, outIdx) => (
           <div key={outIdx} className={styles.outputGroup}>
-            <h2 className={styles.label}>Kernel {channelLabels[outIdx]}</h2>
+            <h2 className={styles.label}>{channelLabels[outIdx]} Kernel</h2>
             <div className={styles.inputGroup}>
               {outputGroup.map((kernel, inIdx) => {
                 const destKey = `${outIdx}-${inIdx}`;
                 return (
                   <div key={inIdx} className={styles.kernelWrapper}>
                     <div className={styles.kernelHeader}>
-                      <h3 className={styles.label}>Channel {channelLabels[inIdx]}</h3>
+                      <h3 className={styles.label}>{channelLabels[inIdx]} Channel</h3>
                       <div className={styles.kernelActions}>
                         <button
                           className={styles.btn}
@@ -98,6 +98,7 @@ export default function WeightEditor({ weights, onWeightUpdate }: WeightEditorPr
                               inputMode="decimal"
                               value={val}
                               className={styles.weightInput}
+                              step={0.1}
                               onChange={e => {
                                 const newVal = e.target.value;
                                 if (newVal === '' || newVal === '-' || newVal === '.' || newVal === '-.') return;
