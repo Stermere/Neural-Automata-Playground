@@ -3,6 +3,7 @@ import { DEFAULT_CONFIG } from "../constants/filenameConstants";
 export type ConfigData = {
   weights: number[][][][];
   activationCode: string;
+  normalize: boolean;
 };
 
 const configModules = import.meta.glob('../constants/defaultConfigs/*.json', { eager: true });

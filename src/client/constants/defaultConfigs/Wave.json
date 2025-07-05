@@ -340,5 +340,6 @@
       ]
     ]
   ],
-  "activationCode": "fn activation(sum: f32, weightSum: f32) -> f32 {\n    let norm = sum / max(weightSum, 1e-5);\n    return select(exp(norm) - 1.0, norm, norm >= 0.0);\n}"
+  "activationCode": "fn activation(x: f32) -> f32 {\n    return select(exp(x) - 1.0, x, x >= 0.0);\n}",
+  "normalize": true
 }

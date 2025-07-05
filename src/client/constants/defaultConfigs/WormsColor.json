@@ -340,5 +340,6 @@
       ]
     ]
   ],
-  "activationCode": "fn inverse_gaussian(x: f32) -> f32 {\n  return -1.0 / pow(2.0, 0.6 * x * x) + 1.0;\n}\n\nfn activation(x: f32, weightSum: f32) -> f32 {\n  return inverse_gaussian(x);\n}"
+  "activationCode": "fn inverse_gaussian(x: f32) -> f32 {\n  return -1.0 / pow(2.0, 0.6 * x * x) + 1.0;\n}\n\nfn activation(x: f32) -> f32 {\n  return inverse_gaussian(x);\n}",
+  "normalize": false
 }

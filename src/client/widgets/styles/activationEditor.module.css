@@ -57,3 +57,23 @@
   border: none;
   font-size: 0.9rem;
 }
+
+.checkboxLabel {
+  font-size: 0.875rem;
+  color: #cfcfcf;
+  background-color: #3a3a3a;
+  padding: 0.5rem;
+  border-radius: 0.5rem;
+  cursor: pointer;
+  user-select: none;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+  transition: background-color 0.2s ease;
+}
+
+.checkboxLabel:hover {
+  background-color: #505050;
+}
+
+.checkboxInput {
+  accent-color: #4a90e2;
+}

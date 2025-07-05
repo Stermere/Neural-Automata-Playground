@@ -4,11 +4,12 @@ import { DEFAULT_EXPORT_NAME, LOCAL_STORAGE_CONFIG_NAME } from '../constants/fil
 
 interface NeuralAutomataConfig {
   weights: number[][][][];
-  activationCode: string
-  onLoad: (weights: number[][][][], activationCode: string) => void;
+  activationCode: string;
+  normalize: boolean;
+  onLoad: (weights: number[][][][], activationCode: { code: string; normalize: boolean }) => void;
 }
 
-export default function NeuralAutomataConfig({ weights, activationCode, onLoad }: NeuralAutomataConfig) {
+export default function NeuralAutomataConfig({ weights, activationCode, normalize, onLoad }: NeuralAutomataConfig) {
   const [filename, setFilename] = useState('');
   const [selected, setSelected] = useState('');
   const [savedFiles, setSavedFiles] = useState<string[]>([]);
@@ -33,6 +34,7 @@ export default function NeuralAutomataConfig({ weights, activationCode, onLoad }
     const data = {
       weights,
       activationCode,
+      normalize,
     };
 
     localStorage.setItem(`${LOCAL_STORAGE_CONFIG_NAME}${writenFilename}`, JSON.stringify(data));
@@ -46,7 +48,7 @@ export default function NeuralAutomataConfig({ weights, activationCode, onLoad }
 
     try {
       const parsed = JSON.parse(data);
-      onLoad(parsed.weights, parsed.activationCode);
+      onLoad(parsed.weights, { code: parsed.activationCode, normalize: parsed.normalize });
       setFilename(name);
     } catch (err) {
       console.error('Failed to parse weights:', err);
@@ -67,11 +69,7 @@ export default function NeuralAutomataConfig({ weights, activationCode, onLoad }
     reader.onload = () => {
       try {
         const data = JSON.parse(reader.result as string);
-        if (Array.isArray(data)) {
-          onLoad(data, activationCode);
-        } else {
-          onLoad(data.weights, data.activationCode || '');
-        }
+        onLoad(data.weights, { code: data.activationCode, normalize: data.normalize });
       } catch (err) {
         console.error('Failed to load weights:', err);
       }
@@ -81,7 +79,7 @@ export default function NeuralAutomataConfig({ weights, activationCode, onLoad }
 
   const handleExport = () => {
     const blob = new Blob(
-      [JSON.stringify({ weights, activationCode }, null, 2)],
+      [JSON.stringify({ weights, activationCode, normalize }, null, 2)],
       { type: 'application/json' }
     );
     const url = URL.createObjectURL(blob);

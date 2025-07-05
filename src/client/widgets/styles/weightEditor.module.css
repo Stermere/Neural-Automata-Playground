@@ -69,6 +69,28 @@
   background-color: #444;
 }
 
+.checkboxLabel {
+  gap: 0.25rem;
+  margin-left: 0.25rem;
+  font-size: 0.875rem;
+  color: #cfcfcf;
+  background-color: #4a4a4a;
+  border: 1px solid #555;
+  padding: 0.25rem 0.5rem;
+  border-radius: 0.25rem;
+  cursor: pointer;
+  user-select: none;
+  transition: background-color 0.2s;
+}
+
+.checkboxLabel:hover {
+  background-color: #4a4a4a;
+}
+
+.checkboxInput {
+  accent-color: #4a90e2;
+}
+
 .label {
   color: #cfcfcf;
   font-size: 0.875rem;
@@ -89,7 +111,7 @@
   color: #e0e0e0;
   border: 1px solid #666;
   padding: 0.3rem 0.6rem;
-  margin-left: 0.5rem;
+  margin-left: 0.25rem;
   border-radius: 0.25rem;
   cursor: pointer;
   transition: background-color 0.2s;

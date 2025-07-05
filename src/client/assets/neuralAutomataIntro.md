@@ -34,3 +34,8 @@ Coming soon!
 ## The Math
 
 Some details are ommited for simplicity, you can always view the source code [here](https://github.com/Stermere/Neural-Automata-Playground/) if your interested in the fine grained details.
+
+- Input image is a matrix with size 3x1024x1024
+- Output image is a matrix with the same size as the Input image
+- Kernel is a matrix with size 3x3x5x5
+- Activation function is any function that takes a number

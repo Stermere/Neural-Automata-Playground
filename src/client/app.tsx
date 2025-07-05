@@ -21,6 +21,7 @@ export default function WebGPUNeuralAutomata(): JSX.Element {
 
   const [weights, setWeights] = useState(initialConfig.weights);
   const [activationCode, setActivationCode] = useState(initialConfig.activationCode);
+  const [normalizeInputToActivation, setNormalize] = useState(initialConfig.normalize);
 
   useEffect(() => {
     if (initialized.current) return;
@@ -39,10 +40,11 @@ export default function WebGPUNeuralAutomata(): JSX.Element {
     controllerRef.current = controller;
 
     controller.init().then(async () => {
-      const flatWeights = initialConfig.weights.flat(3);
-      const activation = initialConfig.activationCode
-      controller.updateWeights(flatWeights);
-      controller.setActivationFunction(activation)
+      controller.updateWeights(initialConfig.weights.flat(3));
+      controller.setActivationFunction({
+        code: initialConfig.activationCode,
+        normalize: initialConfig.normalize
+      });
       controller.randomizeCanvas();
     }).catch(console.error);
 
@@ -57,7 +59,7 @@ export default function WebGPUNeuralAutomata(): JSX.Element {
     }
   }, []);
 
-  const handleConfigLoad = (updatedWeights: number[][][][], updatedActivation: string) => {
+  const handleConfigLoad = (updatedWeights: number[][][][], updatedActivation: { code: string; normalize: boolean }) => {
     handleWeightChange(updatedWeights);
     handleActivationChange(updatedActivation);
   };
@@ -67,9 +69,10 @@ export default function WebGPUNeuralAutomata(): JSX.Element {
     controllerRef.current?.updateWeights(updatedWeights.flat(3));
   };
 
-  const handleActivationChange = (updatedActivationCode: string) => {
-    setActivationCode(updatedActivationCode)
-    controllerRef.current?.setActivationFunction(updatedActivationCode)
+  const handleActivationChange = (updatedActivation: { code: string; normalize: boolean }) => {
+    setActivationCode(updatedActivation.code);
+    setNormalize(updatedActivation.normalize);
+    controllerRef.current?.setActivationFunction(updatedActivation);
   }
 
   return (
@@ -85,7 +88,7 @@ export default function WebGPUNeuralAutomata(): JSX.Element {
           onClear={() => controllerRef.current?.clearCanvas()}
           onRandomize={() => controllerRef.current?.randomizeCanvas()}
         />
-        <NeuralAutomataConfig weights={weights} activationCode={activationCode} onLoad={handleConfigLoad} />
+        <NeuralAutomataConfig weights={weights} activationCode={activationCode} normalize={normalizeInputToActivation} onLoad={handleConfigLoad} />
 
         <ContentSwitcher labels={['Explanation', 'Weight Editor', 'Activation Editor']}>
           <NeuralAutomataIntroduction />
@@ -95,6 +98,7 @@ export default function WebGPUNeuralAutomata(): JSX.Element {
           />
           <ActivationEditor
             code={activationCode}
+            normalize={normalizeInputToActivation}
             onCodeChange={handleActivationChange}
             presets={BASE_ACTIVATIONS}
           />

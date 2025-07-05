@@ -3,12 +3,14 @@ import styles from './styles/activationEditor.module.css';
 
 interface ActivationEditorProps {
   code: string;
-  onCodeChange: (newCode: string) => void;
+  normalize: boolean;
+  onCodeChange: (params: { code: string; normalize: boolean }) => void;
   presets?: Record<string, string>;
 }
 
-export default function ActivationEditor({ code, onCodeChange, presets = {} }: ActivationEditorProps) {
+export default function ActivationEditor({ code, normalize, onCodeChange, presets = {} }: ActivationEditorProps) {
   const [editedCode, setEditedCode] = useState(code);
+  const [normalizeState, setNormalizeState] = useState(normalize);
   const [selectedPreset, setSelectedPreset] = useState('');
 
   const presetEntries = useMemo(() => {
@@ -24,8 +26,15 @@ export default function ActivationEditor({ code, onCodeChange, presets = {} }: A
     setEditedCode(code);
   }, [code]);
 
+  useEffect(() => {
+    setNormalizeState(normalize);
+  }, [normalize]);
+
   const onApply = () => {
-    onCodeChange(editedCode);
+    onCodeChange({
+      code: editedCode,
+      normalize: normalizeState,
+    });
   };
 
   const handlePresetChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
@@ -67,8 +76,17 @@ export default function ActivationEditor({ code, onCodeChange, presets = {} }: A
       />
       <div className={styles.buttonRow}>
         <button className={styles.button} onClick={onApply}>
-          Apply Code
+          Apply Changes
         </button>
+        <label className={styles.checkboxLabel}>
+          <input
+            type="checkbox"
+            className={styles.checkboxInput}
+            checked={normalizeState}
+            onChange={e => setNormalizeState(e.target.checked)}
+          />
+          Pre-normalize input by sum of weights
+        </label>
       </div>
     </div>
   );

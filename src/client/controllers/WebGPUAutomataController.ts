@@ -2,6 +2,9 @@ import computeShaderCode from '../../shaders/compute.wgsl?raw';
 import renderShaderCode from '../../shaders/render.wgsl?raw';
 import { BASE_ACTIVATIONS } from '../constants/baseActivations';
 
+const NORMALIZE_TRUE = 'let norm = x / max(weightSum, 1e-5);';
+const NORMALIZE_FALSE = 'let norm = x;'
+
 // src/controllers/WebGPUNeuralAutomataController.ts
 export interface AutomataConfig {
   canvas: HTMLCanvasElement;
@@ -31,6 +34,7 @@ export class WebGPUNeuralAutomataController {
 
   private baseShaderCode = computeShaderCode;
   private activationCode = BASE_ACTIVATIONS.Linear;
+  private normalizeInput = false;
 
   constructor(private config: AutomataConfig) {
     this.brushRadius = config.brushRadius ?? 20;
@@ -73,8 +77,9 @@ export class WebGPUNeuralAutomataController {
     this.device.queue.writeBuffer(this.weightBuffer, 0, buffer);
   }
 
-  setActivationFunction(code: string) {
-    this.activationCode = code;
+  setActivationFunction(update: { code: string; normalize: boolean }) {
+    this.activationCode = update.code;
+    this.normalizeInput = update.normalize;
     this.recompileComputePipeline();
   }
 
@@ -171,10 +176,15 @@ export class WebGPUNeuralAutomataController {
 
   // fills in variable segments of the compute shader 
   private buildComputeShaderCode(): string {
+
+
     return this.baseShaderCode.replace(
       '@activationFunction',
-      this.activationCode
-    );
+      this.activationCode,
+    ).replace(
+      '@normalizeFlag',
+      this.normalizeInput ? NORMALIZE_TRUE : NORMALIZE_FALSE,
+    )
   }
 
   private makeBindGroup(src: GPUTexture, dst: GPUTexture): GPUBindGroup {

@@ -13,6 +13,11 @@ const channelLabels = ['Red', 'Green', 'Blue'];
 export default function WeightEditor({ weights, onWeightUpdate }: WeightEditorProps) {
   const [copySrc, setCopySrc] = useState<string>('0-0');
 
+  const [symmetrySettings, setSymmetrySettings] = useState<Record<string, {
+    horizontal: boolean;
+    vertical: boolean;
+  }>>({});
+
   const handleChange = (
     outIdx: number,
     inIdx: number,
@@ -20,8 +25,28 @@ export default function WeightEditor({ weights, onWeightUpdate }: WeightEditorPr
     col: number,
     value: number
   ) => {
+    const key = `${outIdx}-${inIdx}`;
     const newWeights = structuredClone(weights);
     newWeights[outIdx][inIdx][row][col] = value;
+
+    const symmetry = symmetrySettings[key];
+
+    if (symmetry?.horizontal) {
+      const mirrorRow = newWeights[outIdx][inIdx].length - 1 - row;
+      newWeights[outIdx][inIdx][mirrorRow][col] = value;
+    }
+
+    if (symmetry?.vertical) {
+      const mirrorCol = newWeights[outIdx][inIdx][row].length - 1 - col;
+      newWeights[outIdx][inIdx][row][mirrorCol] = value;
+    }
+
+    if (symmetry?.vertical && symmetry?.horizontal) {
+      const mirrorCol = newWeights[outIdx][inIdx][row].length - 1 - col;
+      const mirrorRow = newWeights[outIdx][inIdx].length - 1 - row;
+      newWeights[outIdx][inIdx][mirrorRow][mirrorCol] = value;
+    }
+
     onWeightUpdate(newWeights);
   };
 
@@ -86,6 +111,40 @@ export default function WeightEditor({ weights, onWeightUpdate }: WeightEditorPr
                         >
                           Copy Here
                         </button>
+                        <label className={styles.checkboxLabel}>
+                          <input
+                            type="checkbox"
+                            className={styles.checkboxInput}
+                            checked={symmetrySettings[destKey]?.horizontal || false}
+                            onChange={e =>
+                              setSymmetrySettings(prev => ({
+                                ...prev,
+                                [destKey]: {
+                                  ...prev[destKey],
+                                  horizontal: e.target.checked,
+                                },
+                              }))
+                            }
+                          />
+                          ↕︎
+                        </label>
+                        <label className={styles.checkboxLabel}>
+                          <input
+                            type="checkbox"
+                            className={styles.checkboxInput}
+                            checked={symmetrySettings[destKey]?.vertical || false}
+                            onChange={e =>
+                              setSymmetrySettings(prev => ({
+                                ...prev,
+                                [destKey]: {
+                                  ...prev[destKey],
+                                  vertical: e.target.checked,
+                                },
+                              }))
+                            }
+                          />
+                          ↔︎
+                        </label>
                       </div>
                     </div>
                     <div className={styles.kernelGrid}>

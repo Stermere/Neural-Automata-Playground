@@ -27,7 +27,9 @@ fn wrapCoord(x: i32, y: i32) -> vec2<i32> {
 @activationFunction
 
 fn activationClamped(x: f32, weightSum: f32) -> f32 {
-  return clamp(activation(x, weightSum), 0.0, 1.0);
+  // Flag to control normalization 
+  @normalizeFlag
+  return clamp(activation(norm), 0.0, 1.0);
 }
 
 // Get weight from flat array
