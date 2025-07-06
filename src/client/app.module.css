@@ -15,11 +15,12 @@
 }
 
 .canvas {
-  width: min(44vw, 1024px);
-  height: min(44vw, 1024px);
+  width: min(1024px);
+  height: min(1024px);
   margin: 1rem;
   border-radius: 0.75rem;
   display: block;
+  z-index: -1;
 }
 
 @media (max-width: 1910px) {
@@ -29,17 +30,41 @@
   }
 
   .canvas {
-    width: min(100vw, 1024px);
-    height: min(100vw, 1024px);
+    width: min(min(100vw, 1024px), 50vh);
+    height: min(min(100vw, 1024px), 50vh);
+  }
+
+  .controlContainer {
+    position: fixed !important;
+    right: auto !important;
+    top: auto !important;
+    bottom: 0;
+    width: 100% !important;
+    max-width: 1100px !important;
+    margin: 1rem auto !important;
+    max-height: max(45vh, calc(100vh - min(100vw, 1024px))) !important;
+    background-color: rgba(10, 10, 10, 0.3) !important;
+    backdrop-filter: blur(5px) !important;
+    border-radius: 0.75rem !important;
   }
 }
 
 .controlContainer {
+  position: fixed;
+  top: 0;
+  right: 0;
+  max-height: 100vh;
+  overflow-y: auto;
   display: flex;
   flex-direction: column;
-  margin: 1rem;
-  min-width: 1050px;
+  margin: 0;
+  padding: 1rem;
+  background-color: rgba(10, 10, 10, 0.3);
+  backdrop-filter: blur(5px);
+  border-left: 1px solid #404040;
+  border-radius: 0.75rem;
 }
+
 
 .button {
   background-color: #3a3a3a;

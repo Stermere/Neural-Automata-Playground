@@ -22,6 +22,7 @@ export default function WebGPUNeuralAutomata(): JSX.Element {
   const [weights, setWeights] = useState(initialConfig.weights);
   const [activationCode, setActivationCode] = useState(initialConfig.activationCode);
   const [normalizeInputToActivation, setNormalize] = useState(initialConfig.normalize);
+  const [zoom, setZoom] = useState(1);
 
   useEffect(() => {
     if (initialized.current) return;
@@ -59,6 +60,15 @@ export default function WebGPUNeuralAutomata(): JSX.Element {
     }
   }, []);
 
+  useEffect(() => {
+    const handleResize = () => {
+      updateCanvasZoom(zoom);
+    };
+
+    window.addEventListener('resize', handleResize);
+    return () => window.removeEventListener('resize', handleResize);
+  }, [zoom]);
+
   const handleConfigLoad = (updatedWeights: number[][][][], updatedActivation: { code: string; normalize: boolean }) => {
     handleWeightChange(updatedWeights);
     handleActivationChange(updatedActivation);
@@ -75,6 +85,24 @@ export default function WebGPUNeuralAutomata(): JSX.Element {
     controllerRef.current?.setActivationFunction(updatedActivation);
   }
 
+  const handleZoomChange = (newZoom: number) => {
+  setZoom(newZoom);
+  updateCanvasZoom(newZoom);
+};
+
+  const updateCanvasZoom = (zoomLevel: number) => {
+    const canvas = canvasRef.current;
+    if (canvas) {
+      canvas.style.transform = `scale(${zoomLevel})`;
+      const isMobile = window.innerWidth <= 1910;
+      if (isMobile) {
+        canvas.style.transformOrigin = 'top center';
+      } else {
+        canvas.style.transformOrigin = 'top left';
+      }
+    }
+  };
+
   return (
     <div className={styles.canvasContainer}>
       <canvas
@@ -89,6 +117,7 @@ export default function WebGPUNeuralAutomata(): JSX.Element {
           onRandomize={() => controllerRef.current?.randomizeCanvas()}
           onFpsChange={(fps: number) => controllerRef.current?.setMaxFps(fps)}
           onPause={(pause: boolean) => controllerRef.current?.togglePaused(pause)}
+          onZoomChange={(zoom: number) => handleZoomChange(zoom)}
         />
         <NeuralAutomataConfig weights={weights} activationCode={activationCode} normalize={normalizeInputToActivation} onLoad={handleConfigLoad} />
 
