@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import styles from './styles/canvasControl.module.css';
 
 interface CanvasControlProps {
@@ -7,10 +7,12 @@ interface CanvasControlProps {
   onFpsChange: ((fps: number) => void) | undefined;
   onPause: ((paused: boolean) => void) | undefined;
   onZoomChange: ((zoom: number) => void) | undefined;
+  onBrushSizeChange: ((size: number) => void) | undefined;
   disabled?: boolean;
   initialFps?: number;
   initialPaused?: boolean;
   initialZoom?: number;
+  initialBrushSize?: number;
 }
 
 export default function CanvasControl({
@@ -19,14 +21,21 @@ export default function CanvasControl({
   onFpsChange,
   onPause,
   onZoomChange,
+  onBrushSizeChange,
   disabled = false,
   initialFps = 120,
   initialPaused = false,
   initialZoom = 1.0,
+  initialBrushSize = 20,
 }: CanvasControlProps) {
   const [fps, setFps] = useState(initialFps);
   const [isPaused, setIsPaused] = useState(initialPaused);
   const [zoom, setZoom] = useState(initialZoom);
+  const [brushSize, setBrushSize] = useState(initialBrushSize);
+
+  useEffect(() => {
+    setZoom(initialZoom)
+  }, [initialZoom]);
 
   const handleFpsChange = (event: React.ChangeEvent<HTMLInputElement>) => {
     const newFps = parseInt(event.target.value);
@@ -44,6 +53,12 @@ export default function CanvasControl({
     const newZoom = parseFloat(event.target.value);
     setZoom(newZoom);
     onZoomChange?.(newZoom);
+  };
+
+  const handleBrushSizeChange = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const newBrushSize = parseFloat(event.target.value);
+    setBrushSize(newBrushSize)
+    onBrushSizeChange?.(newBrushSize);
   };
 
   return (
@@ -75,7 +90,7 @@ export default function CanvasControl({
           {isPaused ? 'Resume' : 'Pause'}
         </button>
         <label className={styles.label} htmlFor="fps-slider">
-          Fps Target: {fps}
+          Fps: {fps}
         </label>
         <input
           id="fps-slider"
@@ -98,6 +113,20 @@ export default function CanvasControl({
           step="0.25"
           value={zoom}
           onChange={handleZoomChange}
+          disabled={disabled}
+          className={styles.slider}
+        />
+        <label className={styles.label} htmlFor="brush-slider">
+          Brush: {brushSize}px
+        </label>
+        <input
+          id="brush-slider"
+          type="range"
+          min="1"
+          max="100"
+          step="1"
+          value={brushSize}
+          onChange={handleBrushSizeChange}
           disabled={disabled}
           className={styles.slider}
         />

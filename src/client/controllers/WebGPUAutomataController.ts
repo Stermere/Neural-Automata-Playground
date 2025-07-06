@@ -43,6 +43,11 @@ export class WebGPUNeuralAutomataController {
   private lastFrameTime = 0;
   private paused: boolean;
 
+  private isDragging = false;
+  private dragStart = { x: 0, y: 0 };
+  private panOffset = { x: 0, y: 0 };
+
+
   constructor(private config: AutomataConfig) {
     this.brushRadius = config.brushRadius ?? 20;
     this.maxFps = config.maxFps ?? 240;
@@ -134,6 +139,10 @@ export class WebGPUNeuralAutomataController {
     this.frameInterval = 1000 / this.maxFps;
   }
 
+  setBrushSize(size: number): void {
+    this.brushRadius = size;
+  }
+
   togglePaused(paused: boolean): void {
     this.paused = paused;
   }
@@ -193,10 +202,8 @@ export class WebGPUNeuralAutomataController {
     this.bindB = this.makeBindGroup(this.texB, this.texA);
   }
 
-  // fills in variable segments of the compute shader 
+  // Fills in variable segments of the compute shader 
   private buildComputeShaderCode(): string {
-
-
     return this.baseShaderCode.replace(
       '@activationFunction',
       this.activationCode,
@@ -227,10 +234,10 @@ export class WebGPUNeuralAutomataController {
     });
   }
 
+  // Setup panning and drawing functionality
   private setupMouse(canvas: HTMLCanvasElement, gridSize: [number, number]) {
     const getEventCoords = (event: MouseEvent | TouchEvent): [number, number] => {
       let clientX: number, clientY: number;
-
       if (event instanceof TouchEvent) {
         const touch = event.touches[0] || event.changedTouches[0];
         clientX = touch.clientX;
@@ -248,6 +255,18 @@ export class WebGPUNeuralAutomataController {
     };
 
     const handleStart = (e: MouseEvent | TouchEvent) => {
+      if (e instanceof MouseEvent && e.button === 2) {
+        e.preventDefault();
+        const currentTransform = canvas.style.transform;
+        const translateMatch = currentTransform.match(/translate\(([^)]+)\)/);
+        const translateValues = translateMatch?.[1].split(',') ?? ['0', '0'];
+        this.panOffset.x = parseFloat(translateValues[0]) || 0;
+        this.panOffset.y = parseFloat(translateValues[1]) || 0;
+        this.isDragging = true;
+        this.dragStart = { x: e.clientX - this.panOffset.x, y: e.clientY - this.panOffset.y };
+        canvas.style.cursor = 'grabbing';
+        return;
+      }
       e.preventDefault?.();
       this.drawing = true;
       const [gx, gy] = getEventCoords(e);
@@ -255,6 +274,19 @@ export class WebGPUNeuralAutomataController {
     };
 
     const handleMove = (e: MouseEvent | TouchEvent) => {
+      if (e instanceof MouseEvent && this.isDragging) {
+        const newPanX = e.clientX - this.dragStart.x;
+        const newPanY = e.clientY - this.dragStart.y;
+        this.panOffset = { x: newPanX, y: newPanY };
+        
+        const currentTransform = canvas.style.transform;
+        const scaleMatch = currentTransform.match(/scale\(([^)]+)\)/);
+        const currentScale = scaleMatch ? scaleMatch[1] : '1';
+        
+        canvas.style.transform = `translate(${newPanX}px, ${newPanY}px) scale(${currentScale})`;
+        return
+      }
+
       if (!this.drawing) return;
       e.preventDefault?.();
       const [gx, gy] = getEventCoords(e);
@@ -262,16 +294,21 @@ export class WebGPUNeuralAutomataController {
     };
 
     const handleEnd = () => {
+      canvas.style.cursor = 'default';
+      this.isDragging = false;
       this.drawing = false;
     };
 
-    // Mouse events
+    const handleContextMenu = (e: MouseEvent) => {
+      e.preventDefault();
+    };
+
+    // Mouse and touch events 
     canvas.addEventListener('mousedown', handleStart);
     canvas.addEventListener('mousemove', handleMove);
     canvas.addEventListener('mouseup', handleEnd);
     canvas.addEventListener('mouseleave', handleEnd);
-
-    // Touch events
+    canvas.addEventListener('contextmenu', handleContextMenu);
     canvas.addEventListener('touchstart', handleStart, { passive: false });
     canvas.addEventListener('touchmove', handleMove, { passive: false });
     canvas.addEventListener('touchend', handleEnd);
@@ -351,7 +388,6 @@ export class WebGPUNeuralAutomataController {
       passR.draw(4);
       passR.end();
       this.device.queue.submit([encR.finish()]);
-
 
       // Ping-pong
       if (!this.paused) {

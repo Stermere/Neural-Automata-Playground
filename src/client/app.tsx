@@ -69,6 +69,29 @@ export default function WebGPUNeuralAutomata(): JSX.Element {
     return () => window.removeEventListener('resize', handleResize);
   }, [zoom]);
 
+  // Allow zooming via scroll wheel
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+
+    const handleWheel = (e: WheelEvent) => {
+      e.preventDefault();
+      
+      const zoomSpeed = 0.1;
+      const zoomDelta = e.deltaY > 0 ? -zoomSpeed : zoomSpeed;
+      const newZoom = Math.max(0.1, Math.min(15, zoom + zoomDelta));
+      
+      if (newZoom !== zoom) {
+        handleZoomChange(newZoom);
+      }
+    };
+
+    canvas.addEventListener('wheel', handleWheel, { passive: false });
+    return () => {
+      canvas.removeEventListener('wheel', handleWheel);
+    };
+  }, [zoom]);
+
   const handleConfigLoad = (updatedWeights: number[][][][], updatedActivation: { code: string; normalize: boolean }) => {
     handleWeightChange(updatedWeights);
     handleActivationChange(updatedActivation);
@@ -86,14 +109,20 @@ export default function WebGPUNeuralAutomata(): JSX.Element {
   }
 
   const handleZoomChange = (newZoom: number) => {
-  setZoom(newZoom);
-  updateCanvasZoom(newZoom);
-};
+    setZoom(newZoom);
+    updateCanvasZoom(newZoom);
+  };
 
-  const updateCanvasZoom = (zoomLevel: number) => {
+  const updateCanvasZoom = (zoomLevel: number, transformOrigin?: string) => {
     const canvas = canvasRef.current;
     if (canvas) {
       canvas.style.transform = `scale(${zoomLevel})`;
+
+      if (transformOrigin) {
+        canvas.style.transformOrigin = transformOrigin;
+        return
+      }
+
       const isMobile = window.innerWidth <= 1910;
       if (isMobile) {
         canvas.style.transformOrigin = 'top center';
@@ -118,8 +147,15 @@ export default function WebGPUNeuralAutomata(): JSX.Element {
           onFpsChange={(fps: number) => controllerRef.current?.setMaxFps(fps)}
           onPause={(pause: boolean) => controllerRef.current?.togglePaused(pause)}
           onZoomChange={(zoom: number) => handleZoomChange(zoom)}
+          onBrushSizeChange={(size: number) => controllerRef.current?.setBrushSize(size)}
+          initialZoom={zoom}
         />
-        <NeuralAutomataConfig weights={weights} activationCode={activationCode} normalize={normalizeInputToActivation} onLoad={handleConfigLoad} />
+        <NeuralAutomataConfig 
+          weights={weights}
+          activationCode={activationCode} 
+          normalize={normalizeInputToActivation}
+          onLoad={handleConfigLoad} 
+        />
 
         <ContentSwitcher labels={['Explanation', 'Weight Editor', 'Activation Editor']}>
           <NeuralAutomataIntroduction />
