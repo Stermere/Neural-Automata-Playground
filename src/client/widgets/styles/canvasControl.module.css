@@ -40,3 +40,32 @@
   opacity: 0.5;
   cursor: not-allowed;
 }
+
+.controlGroup {
+  display: flex;
+  gap: 10px;
+}
+
+.paused {
+  background-color: #583b3b;
+}
+.paused:hover:enabled {
+  background-color: #385a37;
+}
+
+.playing {
+  background-color: #385a37;
+}
+.playing:hover:enabled {
+  background-color: #583b3b;
+}
+
+.fpsControl {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.fpsSlider {
+  cursor: pointer;
+}

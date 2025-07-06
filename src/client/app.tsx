@@ -87,6 +87,8 @@ export default function WebGPUNeuralAutomata(): JSX.Element {
         <CanvasControl
           onClear={() => controllerRef.current?.clearCanvas()}
           onRandomize={() => controllerRef.current?.randomizeCanvas()}
+          onFpsChange={(fps: number) => controllerRef.current?.setMaxFps(fps)}
+          onPause={(pause: boolean) => controllerRef.current?.togglePaused(pause)}
         />
         <NeuralAutomataConfig weights={weights} activationCode={activationCode} normalize={normalizeInputToActivation} onLoad={handleConfigLoad} />
 

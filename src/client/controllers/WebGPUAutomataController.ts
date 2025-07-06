@@ -10,6 +10,8 @@ export interface AutomataConfig {
   canvas: HTMLCanvasElement;
   gridSize: [number, number];
   brushRadius?: number;
+  maxFps?: number;
+  paused?: boolean;
 }
 
 export class WebGPUNeuralAutomataController {
@@ -36,8 +38,16 @@ export class WebGPUNeuralAutomataController {
   private activationCode = BASE_ACTIVATIONS.Linear;
   private normalizeInput = false;
 
+  private maxFps: number;
+  private frameInterval: number;
+  private lastFrameTime = 0;
+  private paused: boolean;
+
   constructor(private config: AutomataConfig) {
     this.brushRadius = config.brushRadius ?? 20;
+    this.maxFps = config.maxFps ?? 240;
+    this.frameInterval = 1000 / this.maxFps;
+    this.paused = config.paused ?? false;
   }
 
   async init(): Promise<void> {
@@ -117,6 +127,15 @@ export class WebGPUNeuralAutomataController {
 
     this.device.queue.writeTexture({ texture: this.texA, origin: [0, 0, 0] }, pixels, layout, size);
     this.device.queue.writeTexture({ texture: this.texB, origin: [0, 0, 0] }, pixels, layout, size);
+  }
+
+  setMaxFps(fps: number): void {
+    this.maxFps = Math.max(1, fps); // Ensure minimum 1 FPS
+    this.frameInterval = 1000 / this.maxFps;
+  }
+
+  togglePaused(paused: boolean): void {
+    this.paused = paused;
   }
 
   private createWeights(): GPUBuffer {
@@ -283,15 +302,24 @@ export class WebGPUNeuralAutomataController {
   }
 
   private startLoop([w,h]: [number, number]) {
-    const frame = () => {
-      // Compute
-      const encC = this.device.createCommandEncoder();
-      const passC = encC.beginComputePass();
-      passC.setPipeline(this.computePipeline);
-      passC.setBindGroup(0, this.bindA);
-      passC.dispatchWorkgroups(w/16, h/16);
-      passC.end();
-      this.device.queue.submit([encC.finish()]);
+    const frame = (currentTime: number) => {
+      // Check if enough time has passed since last frame
+      if (currentTime - this.lastFrameTime < this.frameInterval) {
+        this.animationId = requestAnimationFrame(frame);
+        return;
+      }
+      this.lastFrameTime = currentTime;
+
+      if (!this.paused) {
+        // Compute
+        const encC = this.device.createCommandEncoder();
+        const passC = encC.beginComputePass();
+        passC.setPipeline(this.computePipeline);
+        passC.setBindGroup(0, this.bindA);
+        passC.dispatchWorkgroups(w/16, h/16);
+        passC.end();
+        this.device.queue.submit([encC.finish()]);
+      }
 
       // Render
       const encR = this.device.createCommandEncoder();
@@ -309,7 +337,8 @@ export class WebGPUNeuralAutomataController {
 
       this.animationId = requestAnimationFrame(frame);
     };
-    frame();
+
+    this.animationId = requestAnimationFrame(frame);
   }
 
   destroy(): void {
