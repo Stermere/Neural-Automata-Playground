@@ -41,11 +41,10 @@
     bottom: 0;
     width: 100% !important;
     max-width: 1100px !important;
-    margin: 1rem auto !important;
     max-height: max(45vh, calc(100vh - min(100vw, 1024px))) !important;
     background-color: rgba(10, 10, 10, 0.3) !important;
     backdrop-filter: blur(5px) !important;
-    border-radius: 0.75rem !important;
+    border-radius: 0.75rem 0.75rem 0rem 0.0rem !important;
   }
 }
 
@@ -62,7 +61,7 @@
   background-color: rgba(10, 10, 10, 0.3);
   backdrop-filter: blur(5px);
   border-left: 1px solid #404040;
-  border-radius: 0.75rem;
+  border-radius: 0rem 0rem 0rem 0.75rem;
 }
 
 

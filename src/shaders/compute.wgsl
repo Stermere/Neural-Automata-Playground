@@ -23,12 +23,23 @@ fn wrapCoord(x: i32, y: i32) -> vec2<i32> {
   return vec2<i32>(ix, iy);
 }
 
+// Additional values that can be accessed by the activation function
+struct ActivationContext {
+    gid: vec3<u32>,
+    weightSum: f32,
+}
+
+var<private> activationContext: ActivationContext;
+
 // Activation function placholder
 @activationFunction
 
 fn activationClamped(x: f32, weightSum: f32) -> f32 {
+  activationContext.weightSum = weightSum;
+
   // Flag to control normalization 
   @normalizeFlag
+
   return clamp(activation(norm), 0.0, 1.0);
 }
 
@@ -40,6 +51,7 @@ fn getWeight(outCh: u32, inCh: u32, kernelIndex: u32) -> f32 {
 // Main compute shader
 @compute @workgroup_size(16, 16)
 fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
+  activationContext.gid = gid;
   let x: i32 = i32(gid.x);
   let y: i32 = i32(gid.y);
 
