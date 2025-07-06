@@ -233,23 +233,23 @@ fn activation(x: f32) -> f32 {
     return select(exp(x) - 1.0, x, x >= 0.0);
 }`,ap=!0,Dy={weights:lp,activationCode:ip,normalize:ap},Ny=Object.freeze(Object.defineProperty({__proto__:null,activationCode:ip,default:Dy,normalize:ap,weights:lp},Symbol.toStringTag,{value:"Module"})),up=[[[[1,1,1,1,1],[1,0,0,0,1],[1,0,0,0,1],[1,0,0,0,1],[1,1,1,1,1]],[[0,0,0,0,0],[0,0,0,0,0],[0,0,0,0,0],[0,0,0,0,0],[-1,0,0,0,-1]],[[0,0,0,0,0],[0,0,0,0,0],[0,0,0,0,0],[0,0,0,0,0],[0,0,0,0,0]]],[[[0,0,0,0,3],[0,0,5,0,0],[0,-2,-10,5,0],[0,0,-2,0,0],[-1,0,0,0,0]],[[1,1,1,1,1],[1,0,0,0,1],[1,0,0,0,1],[1,0,0,0,1],[1,1,1,1,1]],[[5,5,2,0,0],[-1,-1,2,-1,-1],[0,0,2,0,0],[-1,-1,2,-1,-1],[0,0,2,0,0]]],[[[5,5,2,0,0],[-1,-1,2,-1,-1],[0,0,2,0,0],[-1,-1,2,-1,-1],[0,0,2,0,0]],[[1,1,2,0,0],[1,2,3,0,0],[2,3,4,0,0],[0,0,0,0,0],[0,0,0,0,0]],[[1,1,1,1,1],[1,0,0,0,0],[1,0,0,0,0],[1,0,0,0,0],[1,1,1,1,1]]]],rp=`fn activation(x: f32) -> f32 {
     return select(exp(x) - 1.0, x, x >= 0.0);
-}`,cp=!0,By={weights:up,activationCode:rp,normalize:cp},Uy=Object.freeze(Object.defineProperty({__proto__:null,activationCode:rp,default:By,normalize:cp,weights:up},Symbol.toStringTag,{value:"Module"})),op=[[[[0,0,0,0,0],[0,1,1,1,0],[0,1,1,1,0],[0,1,1,1,0],[0,0,0,0,0]],[[0,0,0,0,0],[0,1,1,1,0],[0,1,1,1,0],[0,1,1,1,0],[0,0,0,0,0]],[[0,0,0,0,0],[0,1,1,1,0],[0,1,1,1,0],[0,1,1,1,0],[0,0,0,0,0]]],[[[0,0,0,0,0],[0,0,0,0,0],[0,0,0,0,0],[0,0,0,0,0],[0,0,0,0,0]],[[0,0,0,0,0],[0,1,1,1,0],[0,1,1,1,0],[0,1,1,1,0],[0,0,0,0,0]],[[0,0,0,0,0],[0,1,1,1,0],[0,1,1,1,0],[0,1,1,1,0],[0,0,0,0,0]]],[[[0,0,0,0,0],[0,0,0,0,0],[0,0,0,0,0],[0,0,0,0,0],[0,0,0,0,0]],[[0,0,0,0,0],[0,1,1,1,0],[0,1,1,1,0],[0,1,1,1,0],[0,0,0,0,0]],[[0,0,0,0,0],[0,1,1,1,0],[0,1,1,1,0],[0,1,1,1,0],[0,0,0,0,0]]]],sp=`// SmoothLife activation function
+}`,cp=!0,By={weights:up,activationCode:rp,normalize:cp},Uy=Object.freeze(Object.defineProperty({__proto__:null,activationCode:rp,default:By,normalize:cp,weights:up},Symbol.toStringTag,{value:"Module"})),op=[[[[-.9,0,0,0,-.9],[0,1,1,1,0],[0,1,1,1,0],[0,1,1,1,0],[-.9,0,0,0,-.9]],[[0,0,0,0,0],[0,1,1,1,0],[0,1,0,1,0],[0,1,1,1,0],[0,0,0,0,0]],[[1,0,0,0,1],[0,1,1,1,0],[0,1,1,1,0],[0,1,1,1,0],[1,0,0,0,1]]],[[[0,0,0,0,0],[0,1,1,1,0],[0,1,1,1,0],[0,1,1,1,0],[0,0,0,0,0]],[[0,0,0,0,0],[0,1,1,1,0],[0,1,1,1,0],[0,1,1,1,0],[0,0,0,0,0]],[[0,0,0,0,0],[0,1,1,1,0],[0,1,1,1,0],[0,1,1,1,0],[0,0,0,0,0]]],[[[0,0,0,0,0],[0,1,1,1,0],[0,1,1,1,0],[0,1,1,1,0],[0,0,0,0,0]],[[0,0,0,0,0],[0,1,1,1,0],[-1,1,1,1,-1],[0,1,1,1,0],[0,0,0,0,0]],[[0,0,1,0,0],[0,1,1,1,0],[0,1,1,1,0],[0,1,1,1,0],[0,0,1,0,0]]]],sp=`// SmoothLife activation function
 // Based on Stephan Rafler's "Generalization of Conway's Game of Life to a continuous domain"
 
 // SmoothLife parameters
 const INNER_RADIUS: f32 = 2.5;  // ri - radius of inner disk (cell)
-const OUTER_RADIUS: f32 = 7.5;  // ra - radius of outer ring (neighborhood)
+const OUTER_RADIUS: f32 = 11.5;  // ra - radius of outer ring (neighborhood)
 const ANTIALIASING_WIDTH: f32 = 1.0;  // b - anti-aliasing zone width
 
 // Birth and death intervals
-const BIRTH_1: f32 = 0.278;  // b1
+const BIRTH_1: f32 = 0.266;  // b1
 const BIRTH_2: f32 = 0.365;  // b2
 const DEATH_1: f32 = 0.267;  // d1
-const DEATH_2: f32 = 0.445;  // d2
+const DEATH_2: f32 = 0.435;  // d2
 
 // Sigmoid smoothness parameters
-const ALPHA_N: f32 = 0.028;  // smoothness for neighborhood transitions
-const ALPHA_M: f32 = 0.147;  // smoothness for cell transitions
+const ALPHA_N: f32 = 0.010;  // smoothness for neighborhood transitions
+const ALPHA_M: f32 = 0.137;  // smoothness for cell transitions
 
 // Smooth step function (sigmoid)
 fn sigma1(x: f32, a: f32, alpha: f32) -> f32 {
