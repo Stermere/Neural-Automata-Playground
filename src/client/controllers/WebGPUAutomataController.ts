@@ -286,19 +286,41 @@ export class WebGPUNeuralAutomataController {
   }
 
   private paintCell(gx: number, gy: number): void {
-    const alive = new Uint8Array([255,255,255,255]);
-    for (let dx=-this.brushRadius; dx<=this.brushRadius; dx++) {
-      for (let dy=-this.brushRadius; dy<=this.brushRadius; dy++) {
-        const x = Math.max(0, Math.min(this.config.gridSize[0]-1, gx+dx));
-        const y = Math.max(0, Math.min(this.config.gridSize[1]-1, gy+dy));
-        this.device.queue.writeTexture(
-          { texture: this.texA, origin: [x,y,0] },
-          alive,
-          { bytesPerRow: 4, rowsPerImage: 1 },
-          [1,1,1]
-        );
-      }
+    const [w, h] = this.config.gridSize;
+    
+    const minX = Math.max(0, gx - this.brushRadius);
+    const maxX = Math.min(w - 1, gx + this.brushRadius);
+    const minY = Math.max(0, gy - this.brushRadius);
+    const maxY = Math.min(h - 1, gy + this.brushRadius);
+    
+    const width = maxX - minX + 1;
+    const height = maxY - minY + 1;
+
+    if (width <= 0 || height <= 0) {
+      return;
     }
+    
+    const pixels = new Uint8Array(width * height * 4);
+    
+    for (let i = 0; i < width * height; i++) {
+      pixels[i * 4 + 0] = 255; // R
+      pixels[i * 4 + 1] = 255; // G
+      pixels[i * 4 + 2] = 255; // B
+      pixels[i * 4 + 3] = 255; // A
+    }
+    
+    this.device.queue.writeTexture(
+      { texture: this.texA, origin: [minX, minY, 0] },
+      pixels,
+      { bytesPerRow: width * 4, rowsPerImage: height },
+      [width, height, 1]
+    );
+    this.device.queue.writeTexture(
+      { texture: this.texB, origin: [minX, minY, 0] },
+      pixels,
+      { bytesPerRow: width * 4, rowsPerImage: height },
+      [width, height, 1]
+    );
   }
 
   private startLoop([w,h]: [number, number]) {
@@ -330,10 +352,13 @@ export class WebGPUNeuralAutomataController {
       passR.end();
       this.device.queue.submit([encR.finish()]);
 
+
       // Ping-pong
-      [this.texA, this.texB] = [this.texB, this.texA];
-      [this.bindA, this.bindB] = [this.bindB, this.bindA];
-      this.updateRenderBind();
+      if (!this.paused) {
+        [this.texA, this.texB] = [this.texB, this.texA];
+        [this.bindA, this.bindB] = [this.bindB, this.bindA];
+        this.updateRenderBind();
+      }
 
       this.animationId = requestAnimationFrame(frame);
     };
