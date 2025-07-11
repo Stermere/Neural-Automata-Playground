@@ -27,6 +27,8 @@ fn wrapCoord(x: i32, y: i32) -> vec2<i32> {
 struct ActivationContext {
     gid: vec3<u32>,
     weightSum: f32,
+    cellState: vec3<f32>,
+    channel: u32
 }
 
 var<private> activationContext: ActivationContext;
@@ -52,6 +54,8 @@ fn getWeight(outCh: u32, inCh: u32, kernelIndex: u32) -> f32 {
 @compute @workgroup_size(16, 16)
 fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
   activationContext.gid = gid;
+  activationContext.cellState = textureLoad(src, vec2<u32>(gid.x, gid.y), 0).rgb;
+  
   let x: i32 = i32(gid.x);
   let y: i32 = i32(gid.y);
 
@@ -95,8 +99,11 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     }
   }
 
+  activationContext.channel = 0;
   let outR = activationClamped(sumR, totalWeightR);
+  activationContext.channel = 1;
   let outG = activationClamped(sumG, totalWeightG);
+  activationContext.channel = 2;
   let outB = activationClamped(sumB, totalWeightB);
 
   textureStore(dst, vec2<u32>(gid.xy), vec4<f32>(outR, outG, outB, 1.0));
