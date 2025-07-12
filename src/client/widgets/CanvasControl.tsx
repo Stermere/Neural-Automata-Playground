@@ -109,7 +109,7 @@ export default function CanvasControl({
           id="zoom-slider"
           type="range"
           min="1.0"
-          max="10"
+          max="15"
           step="0.25"
           value={zoom}
           onChange={handleZoomChange}

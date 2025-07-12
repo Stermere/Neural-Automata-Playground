@@ -74,16 +74,51 @@ export default function WebGPUNeuralAutomata(): JSX.Element {
     const canvas = canvasRef.current;
     if (!canvas) return;
 
+    let isZooming = false;
     const handleWheel = (e: WheelEvent) => {
       e.preventDefault();
+      if (isZooming) return;
+      isZooming = true;
       
-      const zoomSpeed = 0.1;
-      const zoomDelta = e.deltaY > 0 ? -zoomSpeed : zoomSpeed;
-      const newZoom = Math.max(0.1, Math.min(15, zoom + zoomDelta));
-      
+      const zoomSpeed = 0.2;
+      const zoomFactor = e.deltaY > 0 ? (1 - zoomSpeed) : (1 + zoomSpeed);
+      const newZoom = Math.max(0.1, Math.min(15, zoom * zoomFactor));
+            
       if (newZoom !== zoom) {
-        handleZoomChange(newZoom);
+        // Get the mouse position relative to the canvas
+        const rect = canvas.getBoundingClientRect();
+        const mouseX = e.clientX - rect.left;
+        const mouseY = e.clientY - rect.top;
+
+        // Parse current translation from canvas transform style
+        const getCurrentTranslation = () => {
+          const transform = canvas.style.transform;
+          const translateMatch = transform.match(/translate\(([^,]+)px,\s*([^)]+)px\)/);
+          if (translateMatch) {
+            console.log(translateMatch);
+            return {
+              x: parseFloat(translateMatch[1]),
+              y: parseFloat(translateMatch[2])
+            };
+          }
+          return { x: 0, y: 0 };
+        };
+
+        const currentTranslation = getCurrentTranslation();
+        const mousePercentX = mouseX / rect.width;
+        const mousePercentY = mouseY / rect.height;
+        const deltaCanvasSizeX =  (newZoom * canvas.width) - (zoom * canvas.width);
+        const deltaCanvasSizeY = (newZoom * canvas.height) - (zoom * canvas.height);
+        const newTranslateX = currentTranslation.x - (deltaCanvasSizeX * mousePercentX);
+        const newTranslateY = currentTranslation.y - (deltaCanvasSizeY * mousePercentY);
+        
+        setZoom(newZoom);
+        updateCanvasZoom(newZoom, `translate(${newTranslateX}px, ${newTranslateY}px)`);
+
       }
+      setTimeout(() => {
+        isZooming = false;
+      }, 16);
     };
 
     canvas.addEventListener('wheel', handleWheel, { passive: false });
@@ -113,22 +148,18 @@ export default function WebGPUNeuralAutomata(): JSX.Element {
     updateCanvasZoom(newZoom);
   };
 
-  const updateCanvasZoom = (zoomLevel: number, transformOrigin?: string) => {
+  const updateCanvasZoom = (zoomLevel: number, transformTranslation?: string) => {
     const canvas = canvasRef.current;
     if (canvas) {
-      canvas.style.transform = `scale(${zoomLevel})`;
-
-      if (transformOrigin) {
-        canvas.style.transformOrigin = transformOrigin;
-        return
+      if (transformTranslation) {
+        const currentTransform = canvas.style.transform || '';
+        const transformWithoutTranslation = currentTransform.replace(/translate\([^)]*\)/g, '');
+        canvas.style.transform  = `${transformWithoutTranslation} ${transformTranslation}`.trim();
       }
 
-      const isMobile = window.innerWidth <= 1910;
-      if (isMobile) {
-        canvas.style.transformOrigin = 'top center';
-      } else {
-        canvas.style.transformOrigin = 'top left';
-      }
+      const currentTransform = canvas.style.transform || '';
+      const transformWithoutScale = currentTransform.replace(/scale\([^)]*\)/g, '');
+      canvas.style.transform  = `${transformWithoutScale} scale(${zoomLevel})`.trim();
     }
   };
 
