@@ -17,7 +17,7 @@ export default function NeuralAutomataConfig({ weights, activationCode, normaliz
 
   useEffect(() => {
     const existing = Object.keys(localStorage).filter(key => key.startsWith(LOCAL_STORAGE_CONFIG_NAME)).map(k => k.slice(LOCAL_STORAGE_CONFIG_NAME.length));
-    setSavedFiles(existing);
+    setSavedFiles(existing.sort());
   }, []);
 
   const handleSave = () => {
@@ -38,7 +38,7 @@ export default function NeuralAutomataConfig({ weights, activationCode, normaliz
     };
 
     localStorage.setItem(`${LOCAL_STORAGE_CONFIG_NAME}${writenFilename}`, JSON.stringify(data));
-    setSavedFiles(prev => [...prev, writenFilename]);
+    setSavedFiles(prev => [...prev, writenFilename].sort());
   };
 
   const handleLoad = (name: string) => {
@@ -58,7 +58,7 @@ export default function NeuralAutomataConfig({ weights, activationCode, normaliz
   const handleDelete = () => {
     if (!filename || !savedFiles.includes(filename)) return;
     localStorage.removeItem(`${LOCAL_STORAGE_CONFIG_NAME}${filename}`);
-    setSavedFiles(prev => prev.filter(name => name !== filename));
+    setSavedFiles(prev => prev.filter(name => name !== filename).sort());
     setFilename('');
   };
 
