@@ -5,12 +5,33 @@ This project uses a GPU compute shader to apply 5×5 convolution filters over a 
 
 **Hosted on GitHub Pages [here](https://stermere.github.io/Neural-Automata-Playground/)**
 
-<p align="center">
- <img src="readMeAssets/Rings.gif" alt="Rings" width="45%"/>
- <img src="readMeAssets/PurpleGoo.gif" alt="Purple Goo" width="45%"/>
- <img src="readMeAssets/NeonWave.gif" alt="Neon Wave" width="45%"/>
- <img src="readMeAssets/BigWorms.gif" alt="Big Worms" width="45%"/>
-</p>
+<details open>
+<summary>🌀 Show Rings</summary>
+
+<img src="readMeAssets/Rings.gif" alt="Rings" width="90%"/>
+
+</details>
+
+<details>
+<summary>💜 Show Purple Goo</summary>
+
+<img src="readMeAssets/PurpleGoo.gif" alt="Purple Goo" width="90%"/>
+
+</details>
+
+<details>
+<summary>🌊 Show Neon Wave</summary>
+
+<img src="readMeAssets/NeonWave.gif" alt="Neon Wave" width="90%"/>
+
+</details>
+
+<details>
+<summary>🐛 Show Big Worms</summary>
+
+<img src="readMeAssets/BigWorms.gif" alt="Big Worms" width="90%"/>
+
+</details>
 
 ## Overview
 
