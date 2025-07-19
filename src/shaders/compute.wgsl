@@ -16,6 +16,9 @@ var dst: texture_storage_2d<rgba8unorm, write>;
 @group(0) @binding(2)
 var<storage, read> weightBuffer: array<f32>;
 
+@group(0) @binding(3)
+var<uniform> timestepData: vec4<f32>; // [timestep, clickX, clickY, unused]
+
 // Coordinate wrapping
 fn wrapCoord(x: i32, y: i32) -> vec2<i32> {
   let ix = (x + i32(WIDTH)) % i32(WIDTH);
@@ -28,10 +31,16 @@ struct ActivationContext {
     gid: vec3<u32>,
     weightSum: f32,
     cellState: vec3<f32>,
-    channel: u32
+    channel: u32,
+    timestep: f32,
+    clickX: f32,
+    clickY: f32
 }
 
 var<private> activationContext: ActivationContext;
+
+// TODO inject this so it is configurable
+var<private> SKIP_CONVOLUTION: bool = false;
 
 // Activation function placholder
 @activationFunction
@@ -67,37 +76,43 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
   var totalWeightG: f32 = 0.0;
   var totalWeightB: f32 = 0.0;
 
-  for (var ky: i32 = -HALF_KERNEL; ky <= HALF_KERNEL; ky++) {
-    for (var kx: i32 = -HALF_KERNEL; kx <= HALF_KERNEL; kx++) {
-      let coord = wrapCoord(x + kx, y + ky);
-      let pixel = textureLoad(src, vec2<u32>(coord), 0).rgb;
+  if (!SKIP_CONVOLUTION) {
+    for (var ky: i32 = -HALF_KERNEL; ky <= HALF_KERNEL; ky++) {
+      for (var kx: i32 = -HALF_KERNEL; kx <= HALF_KERNEL; kx++) {
+        let coord = wrapCoord(x + kx, y + ky);
+        let pixel = textureLoad(src, vec2<u32>(coord), 0).rgb;
 
-      let wx = kx + HALF_KERNEL;
-      let wy = ky + HALF_KERNEL;
-      let kernelIndex = u32(wy * KERNEL_SIZE + wx);
+        let wx = kx + HALF_KERNEL;
+        let wy = ky + HALF_KERNEL;
+        let kernelIndex = u32(wy * KERNEL_SIZE + wx);
 
-      // Weights for each output channel
-      let wRR = getWeight(0u, 0u, kernelIndex);
-      let wRG = getWeight(0u, 1u, kernelIndex);
-      let wRB = getWeight(0u, 2u, kernelIndex);
+        // Weights for each output channel
+        let wRR = getWeight(0u, 0u, kernelIndex);
+        let wRG = getWeight(0u, 1u, kernelIndex);
+        let wRB = getWeight(0u, 2u, kernelIndex);
 
-      let wGR = getWeight(1u, 0u, kernelIndex);
-      let wGG = getWeight(1u, 1u, kernelIndex);
-      let wGB = getWeight(1u, 2u, kernelIndex);
+        let wGR = getWeight(1u, 0u, kernelIndex);
+        let wGG = getWeight(1u, 1u, kernelIndex);
+        let wGB = getWeight(1u, 2u, kernelIndex);
 
-      let wBR = getWeight(2u, 0u, kernelIndex);
-      let wBG = getWeight(2u, 1u, kernelIndex);
-      let wBB = getWeight(2u, 2u, kernelIndex);
+        let wBR = getWeight(2u, 0u, kernelIndex);
+        let wBG = getWeight(2u, 1u, kernelIndex);
+        let wBB = getWeight(2u, 2u, kernelIndex);
 
-      sumR += pixel.r * wRR + pixel.g * wRG + pixel.b * wRB;
-      sumG += pixel.r * wGR + pixel.g * wGG + pixel.b * wGB;
-      sumB += pixel.r * wBR + pixel.g * wBG + pixel.b * wBB;
+        sumR += pixel.r * wRR + pixel.g * wRG + pixel.b * wRB;
+        sumG += pixel.r * wGR + pixel.g * wGG + pixel.b * wGB;
+        sumB += pixel.r * wBR + pixel.g * wBG + pixel.b * wBB;
 
-      totalWeightR += wRR + wRG + wRB;
-      totalWeightG += wGR + wGG + wGB;
-      totalWeightB += wBR + wBG + wBB;
+        totalWeightR += wRR + wRG + wRB;
+        totalWeightG += wGR + wGG + wGB;
+        totalWeightB += wBR + wBG + wBB;
+      }
     }
   }
+
+  activationContext.timestep = timestepData.x;
+  activationContext.clickX = timestepData.y;
+  activationContext.clickY = timestepData.z;
 
   activationContext.channel = 0;
   let outR = activationClamped(sumR, totalWeightR);

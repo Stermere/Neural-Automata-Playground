@@ -95,7 +95,6 @@ export default function WebGPUNeuralAutomata(): JSX.Element {
           const transform = canvas.style.transform;
           const translateMatch = transform.match(/translate\(([^,]+)px,\s*([^)]+)px\)/);
           if (translateMatch) {
-            console.log(translateMatch);
             return {
               x: parseFloat(translateMatch[1]),
               y: parseFloat(translateMatch[2])

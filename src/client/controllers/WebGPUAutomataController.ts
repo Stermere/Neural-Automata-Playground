@@ -5,7 +5,6 @@ import { BASE_ACTIVATIONS } from '../constants/baseActivations';
 const NORMALIZE_TRUE = 'let norm = x / max(weightSum, 1e-5);';
 const NORMALIZE_FALSE = 'let norm = x;'
 
-// src/controllers/WebGPUNeuralAutomataController.ts
 export interface AutomataConfig {
   canvas: HTMLCanvasElement;
   gridSize: [number, number];
@@ -47,6 +46,10 @@ export class WebGPUNeuralAutomataController {
   private dragStart = { x: 0, y: 0 };
   private panOffset = { x: 0, y: 0 };
 
+  private timestep: number = 0;
+  private timestepBuffer!: GPUBuffer;
+  private lastClickX: number = 0;
+  private lastClickY: number = 0;
 
   constructor(private config: AutomataConfig) {
     this.brushRadius = config.brushRadius ?? 20;
@@ -71,6 +74,9 @@ export class WebGPUNeuralAutomataController {
     // Weights
     this.weightBuffer = this.createWeights();
 
+    // Timestep + Click data
+    this.timestepBuffer = this.createTimestepBuffer();
+
     // Pipelines
     this.computePipeline = await this.createComputePipeline(this.buildComputeShaderCode());
     this.renderPipeline  = await this.createRenderPipeline(renderShaderCode);
@@ -90,12 +96,14 @@ export class WebGPUNeuralAutomataController {
   updateWeights(flatWeights: number[]) {
     const buffer = new Float32Array(flatWeights);
     this.device.queue.writeBuffer(this.weightBuffer, 0, buffer);
+    this.timestep = 0;
   }
 
   setActivationFunction(update: { code: string; normalize: boolean }) {
     this.activationCode = update.code;
     this.normalizeInput = update.normalize;
     this.recompileComputePipeline();
+    this.timestep = 0;
   }
 
   clearCanvas(): void {
@@ -115,6 +123,7 @@ export class WebGPUNeuralAutomataController {
 
     this.device.queue.writeTexture({ texture: this.texA, origin: [0, 0, 0] }, pixels, layout, size);
     this.device.queue.writeTexture({ texture: this.texB, origin: [0, 0, 0] }, pixels, layout, size);
+    this.timestep = 0;
   }
 
   randomizeCanvas(): void {
@@ -132,10 +141,11 @@ export class WebGPUNeuralAutomataController {
 
     this.device.queue.writeTexture({ texture: this.texA, origin: [0, 0, 0] }, pixels, layout, size);
     this.device.queue.writeTexture({ texture: this.texB, origin: [0, 0, 0] }, pixels, layout, size);
+    this.timestep = 0;
   }
 
   setMaxFps(fps: number): void {
-    this.maxFps = Math.max(1, fps); // Ensure minimum 1 FPS
+    this.maxFps = Math.max(1, fps);
     this.frameInterval = 1000 / this.maxFps;
   }
 
@@ -169,6 +179,14 @@ export class WebGPUNeuralAutomataController {
     buffer.unmap();
 
     this.weightBuffer = buffer;
+    return buffer;
+  }
+
+  private createTimestepBuffer(): GPUBuffer {
+    const buffer = this.device.createBuffer({
+      size: 4 * 4, // timestep, clickX, clickY, unused
+      usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
+    });
     return buffer;
   }
 
@@ -220,6 +238,7 @@ export class WebGPUNeuralAutomataController {
         { binding: 0, resource: src.createView() },
         { binding: 1, resource: dst.createView() },
         { binding: 2, resource: { buffer: this.weightBuffer } },
+        { binding: 3, resource: { buffer: this.timestepBuffer } },
       ],
     });
   }
@@ -270,6 +289,9 @@ export class WebGPUNeuralAutomataController {
       e.preventDefault?.();
       this.drawing = true;
       const [gx, gy] = getEventCoords(e);
+
+      this.lastClickX = gx;
+      this.lastClickY = gy;
       this.paintCell(gx, gy);
     };
 
@@ -290,6 +312,9 @@ export class WebGPUNeuralAutomataController {
       if (!this.drawing) return;
       e.preventDefault?.();
       const [gx, gy] = getEventCoords(e);
+      
+      this.lastClickX = gx;
+      this.lastClickY = gy;
       this.paintCell(gx, gy);
     };
 
@@ -307,12 +332,22 @@ export class WebGPUNeuralAutomataController {
     canvas.addEventListener('mousedown', handleStart);
     canvas.addEventListener('mousemove', handleMove);
     canvas.addEventListener('mouseup', handleEnd);
-    canvas.addEventListener('mouseleave', handleEnd);
     canvas.addEventListener('contextmenu', handleContextMenu);
     canvas.addEventListener('touchstart', handleStart, { passive: false });
     canvas.addEventListener('touchmove', handleMove, { passive: false });
     canvas.addEventListener('touchend', handleEnd);
     canvas.addEventListener('touchcancel', handleEnd);
+
+    window.addEventListener('mouseup', (e) => {
+      if (this.drawing) {
+        this.drawing = false;
+        canvas.style.cursor = 'default';
+      }
+      if (this.isDragging) {
+        this.isDragging = false;
+        canvas.style.cursor = 'default';
+      }
+    });
   }
 
   private canvasToGrid(x: number, y: number, canvas: HTMLCanvasElement, size: [number, number]): [number, number] {
@@ -340,10 +375,10 @@ export class WebGPUNeuralAutomataController {
     const pixels = new Uint8Array(width * height * 4);
     
     for (let i = 0; i < width * height; i++) {
-      pixels[i * 4 + 0] = 255; // R
-      pixels[i * 4 + 1] = 255; // G
-      pixels[i * 4 + 2] = 255; // B
-      pixels[i * 4 + 3] = 255; // A
+      pixels[i * 4 + 0] = 255;
+      pixels[i * 4 + 1] = 255;
+      pixels[i * 4 + 2] = 255;
+      pixels[i * 4 + 3] = 255;
     }
     
     this.device.queue.writeTexture(
@@ -362,7 +397,6 @@ export class WebGPUNeuralAutomataController {
 
   private startLoop([w,h]: [number, number]) {
     const frame = (currentTime: number) => {
-      // Check if enough time has passed since last frame
       if (currentTime - this.lastFrameTime < this.frameInterval) {
         this.animationId = requestAnimationFrame(frame);
         return;
@@ -370,6 +404,15 @@ export class WebGPUNeuralAutomataController {
       this.lastFrameTime = currentTime;
 
       if (!this.paused) {
+        const timestepData = new Float32Array([
+          this.timestep,
+          this.lastClickX,
+          this.lastClickY,
+          0.0 // Allignment
+        ]);
+        this.device.queue.writeBuffer(this.timestepBuffer, 0, timestepData);
+        this.timestep += 1;
+
         // Compute
         const encC = this.device.createCommandEncoder();
         const passC = encC.beginComputePass();
