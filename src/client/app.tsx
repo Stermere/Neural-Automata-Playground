@@ -10,6 +10,7 @@ import { DefaultConfigController } from './controllers/DefaultConfigController.t
 import { LOCAL_STORAGE_CONFIG_NAME } from './constants/filenameConstants.ts';
 import { BASE_ACTIVATIONS } from './constants/baseActivations.ts';
 import NeuralAutomataIntroduction from './widgets/NeuralAutomataIntroduction.tsx';
+import { DEFAULT_CONFIG } from "./constants/filenameConstants";
 
 const SIZE: [number, number] = [1024, 1024];
 
@@ -55,8 +56,14 @@ export default function WebGPUNeuralAutomata(): JSX.Element {
   }, []);
 
   useEffect(() => {
+    const defaultKey = `${LOCAL_STORAGE_CONFIG_NAME}${DEFAULT_CONFIG}`;
+    const firstRun = !localStorage.getItem(defaultKey);
     for (const [name, config] of Object.entries(DefaultConfigController.configMap)) {
       localStorage.setItem(`${LOCAL_STORAGE_CONFIG_NAME}${name}`, JSON.stringify(config));
+    }
+    
+    if (firstRun) {
+      window.location.reload();
     }
   }, []);
 
