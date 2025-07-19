@@ -29,19 +29,20 @@ You can think of each pixel as a small, independent unit that reacts to its surr
 ## Activation Context
 This construct is globally scoped and available for use within the activation function enabling more complex activation functions.
 ```bash
-struct ActivationContext {
-    gid: vec3<u32>,
-    weightSum: f32,
-    cellState: vec3<f32>,
-    channel: u32
-}
+        struct ActivationContext {
+            gid: vec3<u32>,
+            weightSum: f32,
+            cellState: vec3<f32>,
+            channel: u32
+        }
 
-var<private> activationContext: ActivationContext;
+        var<private> activationContext: ActivationContext;
 
-fn activation(x: f32) -> f32 {
-    return x;
-}
+        fn activation(x: f32) -> f32 {
+            return x;
+        }
 ```
+
 - **gid**: This is the pixel being processed, gid.x and gid.y tell you the coordinates of the current pixel.
 - **weightSum**: This is the sum of all the weights while calculating x.
 - **cellState**: this is the pixel values of the current gid, cellState.r yields the red value of the pixel.

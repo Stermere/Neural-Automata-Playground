@@ -4,6 +4,8 @@ import { BASE_ACTIVATIONS } from '../constants/baseActivations';
 
 const NORMALIZE_TRUE = 'let norm = x / max(weightSum, 1e-5);';
 const NORMALIZE_FALSE = 'let norm = x;'
+const COMPUTE_KERNEL_TRUE = 'var<private> COMPUTE_KERNEL: bool = true;';
+const COMPUTE_KERNEL_FALSE = 'var<private> COMPUTE_KERNEL: bool = false;';
 
 export interface AutomataConfig {
   canvas: HTMLCanvasElement;
@@ -36,6 +38,7 @@ export class WebGPUNeuralAutomataController {
   private baseShaderCode = computeShaderCode;
   private activationCode = BASE_ACTIVATIONS.Linear;
   private normalizeInput = false;
+  private computeKernel = true;
 
   private maxFps: number;
   private frameInterval: number;
@@ -98,9 +101,10 @@ export class WebGPUNeuralAutomataController {
     this.device.queue.writeBuffer(this.weightBuffer, 0, buffer);
   }
 
-  setActivationFunction(update: { code: string; normalize: boolean }) {
+  setActivationFunction(update: { code: string; normalize: boolean, computeKernel?: boolean }) {
     this.activationCode = update.code;
     this.normalizeInput = update.normalize;
+    this.computeKernel = update.computeKernel ?? this.computeKernel;
     this.recompileComputePipeline();
   }
 
@@ -226,6 +230,9 @@ export class WebGPUNeuralAutomataController {
     ).replace(
       '@normalizeFlag',
       this.normalizeInput ? NORMALIZE_TRUE : NORMALIZE_FALSE,
+    ).replace(
+      '@computeKernelFlag',
+      this.computeKernel ? COMPUTE_KERNEL_TRUE : COMPUTE_KERNEL_FALSE,
     )
   }
 

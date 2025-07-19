@@ -126,7 +126,7 @@ export default function WebGPUNeuralAutomata(): JSX.Element {
     };
   }, [zoom]);
 
-  const handleConfigLoad = (updatedWeights: number[][][][], updatedActivation: { code: string; normalize: boolean }) => {
+  const handleConfigLoad = (updatedWeights: number[][][][], updatedActivation: { code: string; normalize: boolean, computeKernel: boolean }) => {
     handleWeightChange(updatedWeights);
     handleActivationChange(updatedActivation);
   };
@@ -136,7 +136,7 @@ export default function WebGPUNeuralAutomata(): JSX.Element {
     controllerRef.current?.updateWeights(updatedWeights.flat(3));
   };
 
-  const handleActivationChange = (updatedActivation: { code: string; normalize: boolean }) => {
+  const handleActivationChange = (updatedActivation: { code: string; normalize: boolean, computeKernel?: boolean }) => {
     setActivationCode(updatedActivation.code);
     setNormalize(updatedActivation.normalize);
     controllerRef.current?.setActivationFunction(updatedActivation);

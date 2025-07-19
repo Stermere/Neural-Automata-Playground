@@ -72,7 +72,6 @@
   line-height: 1.5;
   max-height: 60vh;
   z-index: 1;
-  overflow-y: scroll;
 }
 
 .codeEditor:focus-within {

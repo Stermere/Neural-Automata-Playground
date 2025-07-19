@@ -6,6 +6,8 @@ const HALF_KERNEL: i32 = KERNEL_SIZE / 2;
 const CHANNEL_COUNT: u32 = 3u;
 const KERNEL_AREA: u32 = u32(KERNEL_SIZE * KERNEL_SIZE);
 
+@computeKernelFlag
+
 // Bindings
 @group(0) @binding(0)
 var src: texture_2d<f32>;
@@ -38,9 +40,6 @@ struct ActivationContext {
 }
 
 var<private> activationContext: ActivationContext;
-
-// TODO inject this so it is configurable
-var<private> SKIP_CONVOLUTION: bool = false;
 
 // Activation function placholder
 @activationFunction
@@ -76,7 +75,7 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
   var totalWeightG: f32 = 0.0;
   var totalWeightB: f32 = 0.0;
 
-  if (!SKIP_CONVOLUTION) {
+  if (COMPUTE_KERNEL) {
     for (var ky: i32 = -HALF_KERNEL; ky <= HALF_KERNEL; ky++) {
       for (var kx: i32 = -HALF_KERNEL; kx <= HALF_KERNEL; kx++) {
         let coord = wrapCoord(x + kx, y + ky);

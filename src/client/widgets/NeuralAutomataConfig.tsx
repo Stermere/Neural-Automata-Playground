@@ -6,7 +6,7 @@ interface NeuralAutomataConfig {
   weights: number[][][][];
   activationCode: string;
   normalize: boolean;
-  onLoad: (weights: number[][][][], activationCode: { code: string; normalize: boolean }) => void;
+  onLoad: (weights: number[][][][], activationCode: { code: string; normalize: boolean, computeKernel: boolean }) => void;
 }
 
 export default function NeuralAutomataConfig({ weights, activationCode, normalize, onLoad }: NeuralAutomataConfig) {
@@ -14,6 +14,7 @@ export default function NeuralAutomataConfig({ weights, activationCode, normaliz
   const [selected, setSelected] = useState('');
   const [savedFiles, setSavedFiles] = useState<string[]>([]);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const [computeKernel, setComputeKernel] = useState('true');
 
   useEffect(() => {
     const existing = Object.keys(localStorage).filter(key => key.startsWith(LOCAL_STORAGE_CONFIG_NAME)).map(k => k.slice(LOCAL_STORAGE_CONFIG_NAME.length));
@@ -35,6 +36,7 @@ export default function NeuralAutomataConfig({ weights, activationCode, normaliz
       weights,
       activationCode,
       normalize,
+      computeKernel,
     };
 
     localStorage.setItem(`${LOCAL_STORAGE_CONFIG_NAME}${writenFilename}`, JSON.stringify(data));
@@ -43,13 +45,14 @@ export default function NeuralAutomataConfig({ weights, activationCode, normaliz
 
   const handleLoad = (name: string) => {
     setSelected("")
-    const data = localStorage.getItem(`${LOCAL_STORAGE_CONFIG_NAME}${name}`);
-    if (!data) return;
+    const file = localStorage.getItem(`${LOCAL_STORAGE_CONFIG_NAME}${name}`);
+    if (!file) return;
 
     try {
-      const parsed = JSON.parse(data);
-      onLoad(parsed.weights, { code: parsed.activationCode, normalize: parsed.normalize });
+      const data = JSON.parse(file);
+      onLoad(data.weights, { code: data.activationCode, normalize: data.normalize, computeKernel: data.computeKernel ?? true });
       setFilename(name);
+      setComputeKernel(data.computeKernel);
     } catch (err) {
       console.error('Failed to parse weights:', err);
     }
@@ -69,7 +72,8 @@ export default function NeuralAutomataConfig({ weights, activationCode, normaliz
     reader.onload = () => {
       try {
         const data = JSON.parse(reader.result as string);
-        onLoad(data.weights, { code: data.activationCode, normalize: data.normalize });
+        onLoad(data.weights, { code: data.activationCode, normalize: data.normalize, computeKernel: data.computeKernel ?? true });
+        setComputeKernel(data.computeKernel);
       } catch (err) {
         console.error('Failed to load weights:', err);
       }
