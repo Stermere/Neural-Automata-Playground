@@ -96,24 +96,7 @@ export default function NeuralAutomataConfig({ weights, activationCode, normaliz
 
   return (
     <div className={styles.container}>
-      <h2 className={styles.label}>Profile Managment</h2>
-      <input
-        className={styles.input}
-        value={filename}
-        onChange={e => setFilename(e.target.value)}
-        placeholder="Enter filename"
-      />
-      <div className={styles.actionsRow}>
-        <button className={styles.btn} onClick={handleSave}>Save</button>
-        <button className={styles.btn} onClick={handleExport}>Export</button>
-        <button className={styles.btn} onClick={() => fileInputRef.current?.click()}>import</button>
-        <button
-          className={styles.btn}
-          onClick={handleDelete}
-        >
-          Delete
-        </button>
-      </div>
+      <h2 className={styles.label}>Load Presets</h2>
       <input
         type="file"
         accept="application/json"
@@ -127,6 +110,18 @@ export default function NeuralAutomataConfig({ weights, activationCode, normaliz
           <option key={name} value={name}>{name}</option>
         ))}
       </select>
+      <input
+        className={styles.input}
+        value={filename}
+        onChange={e => setFilename(e.target.value)}
+        placeholder="Enter filename"
+      />
+      <div className={styles.actionsRow}>
+        <button className={styles.btn} onClick={handleSave}>Save</button>
+        <button className={styles.btn} onClick={handleDelete}>Delete</button>
+        <button className={styles.btn} onClick={() => fileInputRef.current?.click()}>Import</button>
+        <button className={styles.btn} onClick={handleExport}>Export</button>
+      </div>
     </div>
   );
 }

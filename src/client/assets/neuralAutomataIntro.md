@@ -21,27 +21,28 @@ You can think of each pixel as a small, independent unit that reacts to its surr
 
 ### General Features
 - **WebGPU acceleration**: All cellular updates run as compute shaders for high performance and scalability.
-- **Brush controls**: Paint initial conditions or perturb existing patterns.
+- **Brush controls**: Paint initial conditions or perturb existing patterns with left click.
+- **Canvas controls**: Drag the canvas with right click and zoom with mousewheel.
 - **Save & load**: Store and recall any combination of weights + activation in your browser’s localStorage.
 - **Import/export**: Download your configurations as JSON files or upload your own to share and collaborate.
 
 ---
 ## Activation Context
-This construct is globally scoped and available for use within the activation function enabling more complex activation functions.
-```bash
-        struct ActivationContext {
-            gid: vec3<u32>,
-            weightSum: f32,
-            cellState: vec3<f32>,
-            channel: u32
-        }
+```wgsl
+struct ActivationContext {
+    gid: vec3<u32>,
+    weightSum: f32,
+    cellState: vec3<f32>,
+    channel: u32
+}
 
-        var<private> activationContext: ActivationContext;
+var<private> activationContext: ActivationContext;
 
-        fn activation(x: f32) -> f32 {
-            return x;
-        }
+fn activation(x: f32) -> f32 {
+    return x;
+}
 ```
+This construct is globally scoped and available for use within the activation function enabling more complex activation functions.
 
 - **gid**: This is the pixel being processed, gid.x and gid.y tell you the coordinates of the current pixel.
 - **weightSum**: This is the sum of all the weights while calculating x.
