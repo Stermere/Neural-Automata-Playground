@@ -15,24 +15,6 @@
   color: #cfcfcf;
 }
 
-.textarea {
-  background-color: #3a3a3a;
-  color: #ffffff;
-  border: 1px solid #555;
-  border-radius: 0.5rem;
-  padding: 0.75rem;
-  font-family: monospace;
-  font-size: 0.9rem;
-  resize: vertical;
-  min-height: 150px;
-  outline: none;
-}
-
-.textarea:focus {
-  border-color: #888;
-  background-color: #444;
-}
-
 .button {
   background-color: #3a3a3a;
   color: #f1f1f1;
@@ -76,4 +58,138 @@
 
 .checkboxInput {
   accent-color: #4a90e2;
+}
+
+.codeEditor {
+  position: relative;
+  display: flex;
+  border: 1px solid #d1d5db;
+  border-radius: 8px;
+  background-color: #1e293b;
+  color: #e2e8f0;
+  font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', 'Consolas', 'Courier New', monospace;
+  font-size: 14px;
+  line-height: 1.5;
+  max-height: 60vh;
+  z-index: 1;
+  overflow-y: scroll;
+}
+
+.codeEditor:focus-within {
+  border-color: #3b82f6;
+  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
+}
+
+.lineNumbers {
+  background-color: #334155;
+  color: #64748b;
+  padding: 12px 8px 12px 12px;
+  user-select: none;
+  text-align: right;
+  min-width: 40px;
+  font-size: 14px;
+  line-height: 1.5;
+  overflow: hidden;
+  border-right: 1px solid #475569;
+}
+
+.lineNumber {
+  height: 21px;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+}
+
+.syntaxHighlight {
+  position: absolute;
+  top: 0;
+  left: 61px;
+  right: 0;
+  bottom: 0;
+  padding: 12px;
+  pointer-events: none;
+  overflow: hidden;
+  white-space: pre;
+  font-size: 14px;
+  line-height: 1.5;
+  z-index: 0;
+  pointer-events: none;
+  user-select: none;
+  white-space: pre-wrap;
+  word-wrap: break-word;
+}
+
+.syntaxHighlight span {
+  pointer-events: none;
+  user-select: none;
+}
+
+.syntaxHighlight pre {
+  margin: 0;
+  padding: 0;
+  background: transparent;
+  color: transparent;
+}
+
+.syntaxHighlight :global(.keyword) {
+  color: #c792ea;
+  font-weight: 500;
+
+}
+
+.syntaxHighlight :global(.type) {
+  color: #82aaff;
+}
+
+.syntaxHighlight :global(.number) {
+  color: #f78c6c;
+}
+
+.syntaxHighlight :global(.string) {
+  color: #c3e88d;
+}
+
+.syntaxHighlight :global(.comment) {
+  color: #546e7a;
+}
+
+.syntaxHighlight :global(.other) {
+  color: #e2e8f0;
+}
+
+.syntaxHighlight :global(.function) {
+  color: #ffc107;
+}
+
+.syntaxHighlight :global(.ops) {
+  color: #d37e0f;
+}
+
+.codeTextarea {
+  flex: 1;
+  background: transparent;
+  color: #ffffff00;
+  border: none;
+  outline: none;
+  resize: none;
+  padding: 12px;
+  font-family: inherit;
+  font-size: inherit;
+  line-height: inherit;
+  white-space: pre;
+  overflow-wrap: normal;
+  overflow-x: auto;
+  overflow-y: auto;
+  z-index: 2;
+  position: relative;
+  caret-color: #e2e8f0;
+}
+
+.codeTextarea::placeholder {
+  color: #64748b;
+  font-style: italic;
+}
+
+.codeTextarea:focus {
+  outline: none;
 }

@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, useRef } from 'react';
 import styles from './styles/activationEditor.module.css';
 
 interface ActivationEditorProps {
@@ -12,6 +12,9 @@ export default function ActivationEditor({ code, normalize, onCodeChange, preset
   const [editedCode, setEditedCode] = useState(code);
   const [normalizeState, setNormalizeState] = useState(normalize);
   const [selectedPreset, setSelectedPreset] = useState('');
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const lineNumbersRef = useRef<HTMLDivElement>(null);
+  const syntaxHighlightRef = useRef<HTMLDivElement>(null);
 
   const presetEntries = useMemo(() => {
     const entries = Object.entries(presets);
@@ -22,6 +25,10 @@ export default function ActivationEditor({ code, normalize, onCodeChange, preset
     return entries;
   }, [presets, code]);
 
+  const lineCount = useMemo(() => {
+    return editedCode.split('\n').length;
+  }, [editedCode]);
+
   useEffect(() => {
     setEditedCode(code);
   }, [code]);
@@ -29,6 +36,92 @@ export default function ActivationEditor({ code, normalize, onCodeChange, preset
   useEffect(() => {
     setNormalizeState(normalize);
   }, [normalize]);
+
+  const handleScroll = () => {
+    if (textareaRef.current && lineNumbersRef.current && syntaxHighlightRef.current) {
+      const scrollTop = textareaRef.current.scrollTop;
+      const scrollLeft = textareaRef.current.scrollLeft;
+      
+      lineNumbersRef.current.scrollTop = scrollTop;
+      syntaxHighlightRef.current.scrollTop = scrollTop;
+      syntaxHighlightRef.current.scrollLeft = scrollLeft;
+    }
+  };
+
+  // Handle tab key for proper indentation
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    if (e.key === 'Tab') {
+      e.preventDefault();
+      const textarea = e.currentTarget;
+      const start = textarea.selectionStart;
+      const end = textarea.selectionEnd;
+      const newValue = editedCode.substring(0, start) + '  ' + editedCode.substring(end);
+      setEditedCode(newValue);
+      setTimeout(() => {
+        textarea.selectionStart = textarea.selectionEnd = start + 2;
+      }, 0);
+    }
+  };
+
+
+  // Simple WGSL syntax highlighting with token-based parsing
+  const highlightSyntax = (code: string) => {
+    const keywords = new Set(['fn', 'var', 'let', 'const', 'if', 'else', 'for', 'while', 'return', 'struct', 'uniform', 'vertex', 'fragment', 'compute']);
+    const types = new Set(['f32', 'i32', 'u32', 'vec2', 'vec3', 'vec4', 'mat2x2', 'mat3x3', 'mat4x4', 'bool', 'array']);
+    const tokens = code.split(/(\s+|\/\/.*$|"(?:[^"\\]|\\.)*"|\d+(?:\.\d+)?(?:[eE][+-]?\d+)?[fh]?|[a-zA-Z_][a-zA-Z0-9_]*|[^\w\s])/gm).filter(token => token !== '');
+    
+    let result = '';
+    
+    for (let i = 0; i < tokens.length; i++) {
+      const token = tokens[i];
+      const nextToken = tokens[i + 1];
+      
+      if (!token) continue;
+      
+      if (/^\s+$/.test(token)) {
+        result += token;
+        continue;
+      }
+      
+      if (token.startsWith('//')) {
+        result += `<span class="comment">${token}</span>`;
+        continue;
+      }
+      
+      if (token.startsWith('"')) {
+        result += `<span class="string">${token}</span>`;
+        continue;
+      }
+      
+      if (/^\d+(?:\.\d+)?(?:[eE][+-]?\d+)?[fh]?$/.test(token)) {
+        result += `<span class="number">${token}</span>`;
+        continue;
+      }
+      
+      if (/^[a-zA-Z_][a-zA-Z0-9_]*$/.test(token) && nextToken === '(') {
+        result += `<span class="function">${token}</span>`;
+        continue;
+      }
+      
+      if (keywords.has(token)) {
+        result += `<span class="keyword">${token}</span>`;
+        continue;
+      }
+      
+      if (types.has(token)) {
+        result += `<span class="type">${token}</span>`;
+        continue;
+      }
+      
+      if (/^[a-zA-Z_][a-zA-Z0-9_]*$/.test(token)) {
+        result += `<span class="other">${token}</span>`;
+      } else {
+        result += `<span class="ops">${token}</span>`;
+      }
+    }
+    
+    return result;
+  };
 
   const onApply = () => {
     onCodeChange({
@@ -44,7 +137,7 @@ export default function ActivationEditor({ code, normalize, onCodeChange, preset
     if (presetCode !== undefined) {
       setEditedCode(presetCode);
     }
-    setSelectedPreset('')
+    setSelectedPreset('');
   };
 
   return (
@@ -67,13 +160,37 @@ export default function ActivationEditor({ code, normalize, onCodeChange, preset
       <label className={styles.label} htmlFor="activationCode">
         Activation Function (WGSL):
       </label>
-      <textarea
-        id="activationCode"
-        className={styles.textarea}
-        value={editedCode}
-        onChange={e => setEditedCode(e.target.value)}
-        spellCheck={false}
-      />
+      
+      <div className={styles.codeEditor}>
+        <div className={styles.lineNumbers} ref={lineNumbersRef}>
+          {Array.from({ length: lineCount }, (_, i) => (
+            <div key={i + 1} className={styles.lineNumber}>
+              {i + 1}
+            </div>
+          ))}
+        </div>
+        
+        <div className={styles.syntaxHighlight} ref={syntaxHighlightRef}>
+          <pre 
+            dangerouslySetInnerHTML={{ 
+              __html: highlightSyntax(editedCode) + '\n' 
+            }}
+          />
+        </div>
+        <textarea
+          id="activationCode"
+          ref={textareaRef}
+          className={styles.codeTextarea}
+          value={editedCode}
+          onChange={e => setEditedCode(e.target.value)}
+          onScroll={handleScroll}
+          onKeyDown={handleKeyDown}
+          spellCheck={false}
+          placeholder="// Enter your WGSL activation function here..."
+
+        />
+      </div>
+      
       <div className={styles.buttonRow}>
         <button className={styles.button} onClick={onApply}>
           Apply Changes

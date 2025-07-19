@@ -96,14 +96,12 @@ export class WebGPUNeuralAutomataController {
   updateWeights(flatWeights: number[]) {
     const buffer = new Float32Array(flatWeights);
     this.device.queue.writeBuffer(this.weightBuffer, 0, buffer);
-    this.timestep = 0;
   }
 
   setActivationFunction(update: { code: string; normalize: boolean }) {
     this.activationCode = update.code;
     this.normalizeInput = update.normalize;
     this.recompileComputePipeline();
-    this.timestep = 0;
   }
 
   clearCanvas(): void {
