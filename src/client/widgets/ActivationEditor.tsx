@@ -63,15 +63,22 @@ export default function ActivationEditor({ code, normalize, onCodeChange, preset
     }
   };
 
-
   // Simple WGSL syntax highlighting with token-based parsing
   const highlightSyntax = (code: string) => {
+    function escapeHTML(str: string): string {
+      return str
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;');
+    }
+
     const keywords = new Set(['fn', 'var', 'let', 'const', 'if', 'else', 'for', 'while', 'return', 'struct', 'uniform', 'vertex', 'fragment', 'compute']);
     const types = new Set(['f32', 'i32', 'u32', 'vec2', 'vec3', 'vec4', 'mat2x2', 'mat3x3', 'mat4x4', 'bool', 'array']);
     const tokens = code.split(/(\s+|\/\/.*$|"(?:[^"\\]|\\.)*"|\d+(?:\.\d+)?(?:[eE][+-]?\d+)?[fh]?|[a-zA-Z_][a-zA-Z0-9_]*|[^\w\s])/gm).filter(token => token !== '');
     
     let result = '';
-    
+
     for (let i = 0; i < tokens.length; i++) {
       const token = tokens[i];
       const nextToken = tokens[i + 1];
@@ -84,7 +91,7 @@ export default function ActivationEditor({ code, normalize, onCodeChange, preset
       }
       
       if (token.startsWith('//')) {
-        result += `<span class="comment">${token}</span>`;
+        result += `<span class="comment">${escapeHTML(token)}</span>`;
         continue;
       }
       
