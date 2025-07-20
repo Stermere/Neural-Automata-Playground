@@ -11,6 +11,8 @@ import { LOCAL_STORAGE_CONFIG_NAME } from './constants/filenameConstants.ts';
 import { BASE_ACTIVATIONS } from './constants/baseActivations.ts';
 import NeuralAutomataIntroduction from './widgets/NeuralAutomataIntroduction.tsx';
 import { DEFAULT_CONFIG } from "./constants/filenameConstants";
+import ActivationVariableEditor from './widgets/ActivationVariableEditor.tsx';
+import { ActivationVariableController } from './controllers/ActivationVariableController.ts';
 
 const SIZE: [number, number] = [1024, 1024];
 
@@ -43,10 +45,8 @@ export default function WebGPUNeuralAutomata(): JSX.Element {
 
     controller.init().then(async () => {
       controller.updateWeights(initialConfig.weights.flat(3));
-      controller.setActivationFunction({
-        code: initialConfig.activationCode,
-        normalize: initialConfig.normalize
-      });
+      controller.setActivationParameters(initialConfig.normalize);
+      controller.setActivationFunctionCode(ActivationVariableController.transformActivationCodeDefault(initialConfig.activationCode));
       controller.randomizeCanvas();
     }).catch(console.error);
 
@@ -146,7 +146,12 @@ export default function WebGPUNeuralAutomata(): JSX.Element {
   const handleActivationChange = (updatedActivation: { code: string; normalize: boolean, computeKernel?: boolean }) => {
     setActivationCode(updatedActivation.code);
     setNormalize(updatedActivation.normalize);
-    controllerRef.current?.setActivationFunction(updatedActivation);
+    controllerRef.current?.setActivationParameters(updatedActivation.normalize, updatedActivation.computeKernel);
+    controllerRef.current?.setActivationFunctionCode(ActivationVariableController.transformActivationCodeDefault(updatedActivation.code));
+  }
+
+  const handleActivationVariableChange = (code: string) => {
+    controllerRef.current?.setActivationFunctionCode(code);
   }
 
   const handleZoomChange = (newZoom: number) => {
@@ -194,7 +199,7 @@ export default function WebGPUNeuralAutomata(): JSX.Element {
           onLoad={handleConfigLoad} 
         />
 
-        <ContentSwitcher labels={['Explanation', 'Weight Editor', 'Activation Editor']}>
+        <ContentSwitcher labels={['Explanation', 'Weight Editor', 'Activation Editor', 'Variable Editor', 'None']}>
           <NeuralAutomataIntroduction />
           <WeightEditor
             weights={weights}
@@ -205,6 +210,10 @@ export default function WebGPUNeuralAutomata(): JSX.Element {
             normalize={normalizeInputToActivation}
             onCodeChange={handleActivationChange}
             presets={BASE_ACTIVATIONS}
+          />
+          <ActivationVariableEditor
+            code={activationCode}
+            onVariableChange={handleActivationVariableChange}
           />
         </ContentSwitcher>
       </div>

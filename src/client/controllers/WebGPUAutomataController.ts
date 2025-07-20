@@ -101,10 +101,13 @@ export class WebGPUNeuralAutomataController {
     this.device.queue.writeBuffer(this.weightBuffer, 0, buffer);
   }
 
-  setActivationFunction(update: { code: string; normalize: boolean, computeKernel?: boolean }) {
-    this.activationCode = update.code;
-    this.normalizeInput = update.normalize;
-    this.computeKernel = update.computeKernel ?? this.computeKernel;
+  setActivationParameters(normalize: boolean, computeKernel?: boolean) {
+    this.normalizeInput = normalize;
+    this.computeKernel = computeKernel ?? this.computeKernel;
+  }
+
+  setActivationFunctionCode(code: string) {
+    this.activationCode = code;
     this.recompileComputePipeline();
   }
 

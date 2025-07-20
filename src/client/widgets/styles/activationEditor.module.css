@@ -90,6 +90,7 @@
   line-height: 1.5;
   overflow: hidden;
   border-right: 1px solid #475569;
+  border-radius: 8px 0px 0px 8px;
 }
 
 .lineNumber {
