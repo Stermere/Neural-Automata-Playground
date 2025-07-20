@@ -570,7 +570,7 @@ fn mandelbrotD(c: ComplexF64) -> f32 {
     }
     let finalMag2 = complex_f64_mag_sq(z);
     let mu = f32(i) + 1.0 - log2(log2(f64_to_f32(finalMag2)) * 0.5);
-    return mu * 0.08;
+    return mu * 0.3;
 }
 
 // —— Entry point ——
@@ -579,6 +579,12 @@ fn activation(x: f32) -> f32 {
     let c = pixelToComplexF64(activationContext.gid);
     let m = mandelbrotD(c);
 
+    // Inside the Mandelbrot set (did not escape)
+    if (m == 0.0) {
+        return 0.0;
+    }
+
+    // Outside: color based on escape time
     if (activationContext.channel == 0u) {
         return sin(m) * 0.5 + 0.5;
     } else if (activationContext.channel == 1u) {
