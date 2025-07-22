@@ -1,26 +1,34 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import styles from './styles/activationVariableEditor.module.css';
-import { ActivationVariableController, ActivationVariable, VariableValue } from '../controllers/ActivationVariableController';
+import { ActivationVariableUtils, ActivationVariable, VariableValue } from '../utils/ActivationVariableUtils';
 
 interface ActivationVariableEditorProps {
   code: string;
+  values: VariableValue[],
+  setValues: (values: VariableValue[]) => void;
   onVariableChange: (code: string) => void;
 }
 
-export default function ActivationVariableEditor({ code, onVariableChange }: ActivationVariableEditorProps) {
+export default function ActivationVariableEditor({ code, values, setValues, onVariableChange }: ActivationVariableEditorProps) {
   const [variables, setVariables] = useState<ActivationVariable[]>([]);
-  const [values, setValues] = useState<VariableValue[]>([]);
   const [debouncedValues, setDebouncedValues] = useState<VariableValue[]>([]);
 
   useEffect(() => {
-    const vars = ActivationVariableController.getVariables(code);
-    const initialValues = vars.map((v) => ({
-      name: v.name,
-      value: v.default.toString(),
-    }));
-    setVariables(vars);
-    setValues(initialValues);
-    setDebouncedValues(initialValues);
+    const parsedVars = ActivationVariableUtils.getVariables(code);
+
+    // Build new values based on memory or default
+    const newValues: VariableValue[] = parsedVars.map((v) => {
+      const remembered = values.find((val) => val.name === v.name);
+      return {
+        name: v.name,
+        value: remembered?.value ?? v.default,
+      };
+    });
+
+    // Save to state and memory
+    setVariables(parsedVars);
+    setValues(newValues);
+    setDebouncedValues(newValues);
   }, [code]);
 
   useEffect(() => {
@@ -31,24 +39,23 @@ export default function ActivationVariableEditor({ code, onVariableChange }: Act
   }, [values]);
 
   useEffect(() => {
-    const newCode = ActivationVariableController.transformActivationCode(code, debouncedValues);
+    const newCode = ActivationVariableUtils.transformActivationCode(code, debouncedValues);
     onVariableChange(newCode);
   }, [debouncedValues]);
 
   const handleSliderChange = (name: string, newValue: string) => {
-    setValues((prev) =>
-      prev.map((v) => (v.name === name ? { ...v, value: newValue } : v))
+    setValues(values.map((v) => (v.name === name ? { ...v, value: parseFloat(newValue) } : v))
     );
   };
 
   return (
     <div className={styles.container}>
       {variables.map((v) => {
-        const currentValue = values.find((val) => val.name === v.name)?.value ?? v.default.toString();
+        const currentValue = values.find((val) => val.name === v.name)?.value ?? v.default;
         return (
           <div key={v.name} className={styles.output}>
             <label className={styles.label} htmlFor={`slider-${v.name}`}>
-              {v.name}: {parseFloat(currentValue).toFixed(2)}
+              {v.name}: {currentValue.toFixed(2)}
             </label>
             <input
               id={`slider-${v.name}`}

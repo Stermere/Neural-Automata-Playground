@@ -12,7 +12,7 @@ import { BASE_ACTIVATIONS } from './constants/baseActivations.ts';
 import NeuralAutomataIntroduction from './widgets/NeuralAutomataIntroduction.tsx';
 import { DEFAULT_CONFIG } from "./constants/filenameConstants";
 import ActivationVariableEditor from './widgets/ActivationVariableEditor.tsx';
-import { ActivationVariableController } from './controllers/ActivationVariableController.ts';
+import { ActivationVariableUtils } from './utils/ActivationVariableUtils.ts';
 
 const SIZE: [number, number] = [1024, 1024];
 
@@ -24,6 +24,7 @@ export default function WebGPUNeuralAutomata(): JSX.Element {
 
   const [weights, setWeights] = useState(initialConfig.weights);
   const [activationCode, setActivationCode] = useState(initialConfig.activationCode);
+  const [activationVariables, setActivationVariables] = useState(ActivationVariableUtils.getDefaultVariableValues(ActivationVariableUtils.getVariables(initialConfig.activationCode)));
   const [normalizeInputToActivation, setNormalize] = useState(initialConfig.normalize);
   const [zoom, setZoom] = useState(1);
 
@@ -46,7 +47,7 @@ export default function WebGPUNeuralAutomata(): JSX.Element {
     controller.init().then(async () => {
       controller.updateWeights(initialConfig.weights.flat(3));
       controller.setActivationParameters(initialConfig.normalize);
-      controller.setActivationFunctionCode(ActivationVariableController.transformActivationCodeDefault(initialConfig.activationCode));
+      controller.setActivationFunctionCode(ActivationVariableUtils.transformActivationCodeDefault(initialConfig.activationCode));
       controller.randomizeCanvas();
     }).catch(console.error);
 
@@ -147,7 +148,7 @@ export default function WebGPUNeuralAutomata(): JSX.Element {
     setActivationCode(updatedActivation.code);
     setNormalize(updatedActivation.normalize);
     controllerRef.current?.setActivationParameters(updatedActivation.normalize, updatedActivation.computeKernel);
-    controllerRef.current?.setActivationFunctionCode(ActivationVariableController.transformActivationCodeDefault(updatedActivation.code));
+    controllerRef.current?.setActivationFunctionCode(ActivationVariableUtils.transformActivationCodeDefault(updatedActivation.code));
   }
 
   const handleActivationVariableChange = (code: string) => {
@@ -213,6 +214,8 @@ export default function WebGPUNeuralAutomata(): JSX.Element {
           />
           <ActivationVariableEditor
             code={activationCode}
+            values={activationVariables}
+            setValues={setActivationVariables}
             onVariableChange={handleActivationVariableChange}
           />
         </ContentSwitcher>

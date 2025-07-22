@@ -7,10 +7,10 @@ export type ActivationVariable = {
 
 export type VariableValue = {
   name: string;
-  value: string;
+  value: number;
 };
 
-export class ActivationVariableController {
+export class ActivationVariableUtils {
   // Finds lines with constants and @variable annotations, replaces with defaults
   static transformActivationCodeDefault(code: string): string {
     return code.replace(
@@ -47,5 +47,12 @@ export class ActivationVariableController {
     }
 
     return variables;
+  }
+
+  static getDefaultVariableValues(activationVariables: ActivationVariable[]): VariableValue[] {
+    return activationVariables.map((variable) => ({
+      name: variable.name,
+      value: variable.default,
+    }));
   }
 }
