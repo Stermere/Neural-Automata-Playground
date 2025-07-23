@@ -1,4 +1,5 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useState } from 'react';
+import { useDebounce } from '../hooks/useDebounce';
 import styles from './styles/activationVariableEditor.module.css';
 import { ActivationVariableUtils, ActivationVariable, VariableValue } from '../utils/ActivationVariableUtils';
 
@@ -11,7 +12,8 @@ interface ActivationVariableEditorProps {
 
 export default function ActivationVariableEditor({ code, values, setValues, onVariableChange }: ActivationVariableEditorProps) {
   const [variables, setVariables] = useState<ActivationVariable[]>([]);
-  const [debouncedValues, setDebouncedValues] = useState<VariableValue[]>([]);
+
+  const debouncedValues = useDebounce(values, 100);
 
   useEffect(() => {
     const parsedVars = ActivationVariableUtils.getVariables(code);
@@ -28,18 +30,11 @@ export default function ActivationVariableEditor({ code, values, setValues, onVa
     // Save to state and memory
     setVariables(parsedVars);
     setValues(newValues);
-    setDebouncedValues(newValues);
   }, [code]);
 
-  useEffect(() => {
-    const timeout = setTimeout(() => {
-      setDebouncedValues(values);
-    }, 100);
-    return () => clearTimeout(timeout);
-  }, [values]);
 
   useEffect(() => {
-    const newCode = ActivationVariableUtils.transformActivationCode(code, debouncedValues);
+    const newCode = ActivationVariableUtils.transformActivationCode(code, values);
     onVariableChange(newCode);
   }, [debouncedValues]);
 
