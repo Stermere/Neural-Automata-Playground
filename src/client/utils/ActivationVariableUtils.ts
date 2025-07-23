@@ -10,11 +10,13 @@ export type VariableValue = {
   value: number;
 };
 
+const CONST_F32_MATCHER: RegExp = /const\s+(\w+)\s*:\s*f32\s*=\s*([\d.eE+-]+)\s*;\s*@variable\s+([\d.eE+-]+)\s+([\d.eE+-]+)/g;
+
 export class ActivationVariableUtils {
   // Finds lines with constants and @variable annotations, replaces with defaults
   static transformActivationCodeDefault(code: string): string {
     return code.replace(
-      /const\s+(\w+)\s*:\s*f32\s*=\s*([\d.eE+-]+)\s*;\s*@variable\s+([\d.eE+-]+)\s+([\d.eE+-]+)/g,
+      CONST_F32_MATCHER,
       (match, name, def, max, min) => `const ${name}: f32 = ${def};`
     );
   }
@@ -22,7 +24,7 @@ export class ActivationVariableUtils {
   // Replaces variable values with user-modified values
   static transformActivationCode(code: string, variableValues: VariableValue[]): string {
     return code.replace(
-      /const\s+(\w+)\s*:\s*f32\s*=\s*([\d.eE+-]+)\s*;\s*@variable\s+([\d.eE+-]+)\s+([\d.eE+-]+)/g,
+      CONST_F32_MATCHER,
       (match, name, def, max, min) => {
         const variable = variableValues.find((v) => v.name === name);
         const newValue = variable ? variable.value : def;
@@ -33,10 +35,9 @@ export class ActivationVariableUtils {
 
   // Extracts all @variable constants into ActivationVariable objects
   static getVariables(code: string): ActivationVariable[] {
-    const regex = /const\s+(\w+)\s*:\s*f32\s*=\s*([\d.eE+-]+)\s*;\s*@variable\s+([\d.eE+-]+)\s+([\d.eE+-]+)/g;
     const variables: ActivationVariable[] = [];
     let match;
-    while ((match = regex.exec(code)) !== null) {
+    while ((match = CONST_F32_MATCHER.exec(code)) !== null) {
       const [_, name, defStr, minStr, maxStr] = match;
       variables.push({
         name,
@@ -54,5 +55,17 @@ export class ActivationVariableUtils {
       name: variable.name,
       value: variable.default,
     }));
+  }
+
+  static updateDefaults(code: string, variableValues: VariableValue[]): string {
+    return code.replace(
+      CONST_F32_MATCHER,
+      (_match, name, defStr, minStr, maxStr) => {
+        const variable = variableValues.find((v) => v.name === name);
+        const newDefault = variable != null ? variable.value : parseFloat(defStr);
+
+        return `const ${name}: f32 = ${newDefault}; @variable ${minStr} ${maxStr}`;
+      }
+    );
   }
 }

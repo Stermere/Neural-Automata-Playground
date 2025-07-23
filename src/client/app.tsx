@@ -198,6 +198,7 @@ export default function WebGPUNeuralAutomata(): JSX.Element {
           weights={weights}
           activationCode={activationCode} 
           normalize={normalizeInputToActivation}
+          activationVariables={activationVariables}
           onLoad={handleConfigLoad} 
         />
 

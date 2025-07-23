@@ -1,15 +1,17 @@
 import React, { useState, useRef, useEffect } from 'react';
 import styles from './styles/neuralAutomataConfig.module.css';
 import { DEFAULT_EXPORT_NAME, LOCAL_STORAGE_CONFIG_NAME } from '../constants/filenameConstants';
+import { ActivationVariableUtils, VariableValue } from '../utils/ActivationVariableUtils';
 
 interface NeuralAutomataConfig {
   weights: number[][][][];
   activationCode: string;
   normalize: boolean;
+  activationVariables: VariableValue[];
   onLoad: (weights: number[][][][], activationCode: { code: string; normalize: boolean, computeKernel: boolean }) => void;
 }
 
-export default function NeuralAutomataConfig({ weights, activationCode, normalize, onLoad }: NeuralAutomataConfig) {
+export default function NeuralAutomataConfig({ weights, activationCode, normalize, activationVariables, onLoad }: NeuralAutomataConfig) {
   const [filename, setFilename] = useState('');
   const [selected, setSelected] = useState('');
   const [savedFiles, setSavedFiles] = useState<string[]>([]);
@@ -32,9 +34,11 @@ export default function NeuralAutomataConfig({ weights, activationCode, normaliz
       counter++;
     }
 
+    const activationCodeUpdated = ActivationVariableUtils.updateDefaults(activationCode, activationVariables);
+
     const data = {
       weights,
-      activationCode,
+      activationCode: activationCodeUpdated,
       normalize,
       computeKernel,
     };
