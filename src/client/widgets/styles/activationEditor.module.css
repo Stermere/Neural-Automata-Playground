@@ -158,7 +158,7 @@
 }
 
 .syntaxHighlight :global(.function) {
-  color: #ffc107;
+  color: #48c45d;
 }
 
 .syntaxHighlight :global(.ops) {
