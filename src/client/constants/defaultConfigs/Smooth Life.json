@@ -268,35 +268,35 @@
         [
           0,
           0,
-          0,
-          0,
-          0
-        ],
-        [
-          0,
-          0,
-          0,
+          -0.2,
           0,
           0
         ],
         [
           0,
           0,
+          -0.3,
           0,
+          0
+        ],
+        [
+          -0.2,
+          -0.3,
+          6.1,
+          -0.3,
+          -0.2
+        ],
+        [
+          0,
+          0,
+          -0.3,
           0,
           0
         ],
         [
           0,
           0,
-          0,
-          0,
-          0
-        ],
-        [
-          0,
-          0,
-          0,
+          -0.2,
           0,
           0
         ]
@@ -340,6 +340,6 @@
       ]
     ]
   ],
-  "activationCode": "// SmoothLife activation function\n// Based on Stephan Rafler's \"Generalization of Conway's Game of Life to a continuous domain\"\n\n// SmoothLife parameters\nconst INNER_RADIUS: f32 = 2.5;  // ri - radius of inner disk (cell)\nconst OUTER_RADIUS: f32 = 11.5;  // ra - radius of outer ring (neighborhood)\nconst ANTIALIASING_WIDTH: f32 = 1.0;  // b - anti-aliasing zone width\n\n// Birth and death intervals\nconst BIRTH_1: f32 = 0.216;  // b1\nconst BIRTH_2: f32 = 0.365;  // b2\nconst DEATH_1: f32 = 0.267;  // d1\nconst DEATH_2: f32 = 0.435;  // d2\n\n// Sigmoid smoothness parameters\nconst ALPHA_N: f32 = 0.010;  // smoothness for neighborhood transitions\nconst ALPHA_M: f32 = 0.137;  // smoothness for cell transitions\n\n// Smooth step function (sigmoid)\nfn sigma1(x: f32, a: f32, alpha: f32) -> f32 {\n    return 1.0 / (1.0 + exp(-(x - a) * 4.0 / alpha));\n}\n\n// Interval function (between a and b)\nfn sigma2(x: f32, a: f32, b: f32, alpha: f32) -> f32 {\n    return sigma1(x, a, alpha) * (1.0 - sigma1(x, b, alpha));\n}\n\n// Mixing function based on cell state\nfn sigmaMix(x: f32, y: f32, m: f32, alpha: f32) -> f32 {\n    return x * (1.0 - sigma1(m, 0.5, alpha)) + y * sigma1(m, 0.5, alpha);\n}\n\n// Calculate neighborhood (outer ring) filling\nfn calculateNeighborhood(gid: vec3<u32>) -> f32 {\n    let x = i32(gid.x);\n    let y = i32(gid.y);\n    let centerX = f32(x);\n    let centerY = f32(y);\n    \n    var sum: f32 = 0.0;\n    var totalWeight: f32 = 0.0;\n    \n    // Sample in a larger radius for the outer ring\n    let sampleRadius = i32(ceil(OUTER_RADIUS + ANTIALIASING_WIDTH));\n    \n    for (var dy: i32 = -sampleRadius; dy <= sampleRadius; dy++) {\n        for (var dx: i32 = -sampleRadius; dx <= sampleRadius; dx++) {\n            let sampleX = centerX + f32(dx);\n            let sampleY = centerY + f32(dy);\n            let distance = sqrt(f32(dx * dx + dy * dy));\n            \n            // Only consider points in the outer ring\n            if (distance >= INNER_RADIUS && distance <= OUTER_RADIUS + ANTIALIASING_WIDTH) {\n                let coord = wrapCoord(x + dx, y + dy);\n                let pixel = textureLoad(src, vec2<u32>(coord), 0);\n                \n                // Anti-aliasing weight calculation for outer ring\n                var weight: f32 = 0.0;\n                \n                // Inner boundary of ring\n                if (distance < INNER_RADIUS + ANTIALIASING_WIDTH) {\n                    weight = (distance - INNER_RADIUS + ANTIALIASING_WIDTH * 0.5) / ANTIALIASING_WIDTH;\n                }\n                // Outer boundary of ring\n                else if (distance > OUTER_RADIUS - ANTIALIASING_WIDTH) {\n                    weight = (OUTER_RADIUS + ANTIALIASING_WIDTH * 0.5 - distance) / ANTIALIASING_WIDTH;\n                }\n                else {\n                    weight = 1.0;\n                }\n                \n                weight = clamp(weight, 0.0, 1.0);\n\n                // Use the same pixel the kernel for this call to activation function is using\n                let channelValue = pixel[activationContext.channel];\n                sum += channelValue * weight;\n                totalWeight += weight;\n            }\n        }\n    }\n    \n    return select(0.0, sum / totalWeight, totalWeight > 0.0);\n}\n\nfn activation(x: f32) -> f32 {\n    // x is the convolution result (inner region)\n    // Normalize by kernel area to get the filling ratio\n    let innerFilling = x / f32(KERNEL_AREA);\n    \n    // Calculate neighborhood filling (outer region)\n    let outerFilling = calculateNeighborhood(activationContext.gid);\n    \n    // Apply SmoothLife transition function\n    let n = outerFilling;\n    let m = innerFilling;\n    \n    // Calculate birth and death thresholds based on the current cell state\n    let birthThreshold1 = sigmaMix(BIRTH_1, DEATH_1, m, ALPHA_M);\n    let birthThreshold2 = sigmaMix(BIRTH_2, DEATH_2, m, ALPHA_M);\n    \n    // Apply the transition function\n    let result = sigma2(n, birthThreshold1, birthThreshold2, ALPHA_N);\n\n    // For discrete time stepping, return the result directly\n    // For continuous time stepping, this would be: m + dt * (2*birthSignal - 1)\n    return clamp(m + (0.3 * (2 * result - 1)), 0.0, 1.0);\n}",
+  "activationCode": "// SmoothLife activation function\n// Based on Stephan Rafler's \"Generalization of Conway's Game of Life to a continuous domain\"\n\n// Birth and death intervals\nconst BIRTH_1: f32 = 0.216; @variable 0.0 1.0\nconst BIRTH_2: f32 = 0.39; @variable 0.0 1.0\nconst DEATH_1: f32 = 0.29; @variable 0.0 1.0\nconst DEATH_2: f32 = 0.435; @variable 0.0 1.0\n\nconst INNER_RADIUS: f32 = 2.5; @variable 1.0 5.0  // ri - radius of inner disk (cell)\nconst OUTER_RADIUS: f32 = 13.59; @variable 7.0 15.0  // ra - radius of outer ring (neighborhood)\n\n// Sigmoid smoothness parameters\nconst ALPHA_N: f32 = 0.01; @variable 0.0 0.2\nconst ALPHA_M: f32 = 0.137; @variable 0.0 1.0\n\nconst DELTA_T: f32 = 0.28; @variable 0.0 1.0\nconst ANTIALIASING_WIDTH: f32 = 1; @variable 0.0 3.0\n\n// Smooth step function (sigmoid)\nfn sigma1(x: f32, a: f32, alpha: f32) -> f32 {\n    return 1.0 / (1.0 + exp(-(x - a) * 4.0 / alpha));\n}\n\n// Interval function (between a and b)\nfn sigma2(x: f32, a: f32, b: f32, alpha: f32) -> f32 {\n    return sigma1(x, a, alpha) * (1.0 - sigma1(x, b, alpha));\n}\n\n// Mixing function based on cell state\nfn sigmaMix(x: f32, y: f32, m: f32, alpha: f32) -> f32 {\n    return x * (1.0 - sigma1(m, 0.5, alpha)) + y * sigma1(m, 0.5, alpha);\n}\n\n// Calculate neighborhood (outer ring) filling\nfn calculateNeighborhood(gid: vec3<u32>) -> f32 {\n    let x = i32(gid.x);\n    let y = i32(gid.y);\n    let centerX = f32(x);\n    let centerY = f32(y);\n    \n    var sum: f32 = 0.0;\n    var totalWeight: f32 = 0.0;\n    \n    // Sample in a larger radius for the outer ring\n    let sampleRadius = i32(ceil(OUTER_RADIUS + ANTIALIASING_WIDTH));\n    \n    for (var dy: i32 = -sampleRadius; dy <= sampleRadius; dy++) {\n        for (var dx: i32 = -sampleRadius; dx <= sampleRadius; dx++) {\n            let sampleX = centerX + f32(dx);\n            let sampleY = centerY + f32(dy);\n            let distance = sqrt(f32(dx * dx + dy * dy));\n            \n            // Only consider points in the outer ring\n            if (distance >= INNER_RADIUS && distance <= OUTER_RADIUS + ANTIALIASING_WIDTH) {\n                let coord = wrapCoord(x + dx, y + dy);\n                let pixel = textureLoad(src, vec2<u32>(coord), 0);\n                \n                // Anti-aliasing weight calculation for outer ring\n                var weight: f32 = 0.0;\n                \n                // Inner boundary of ring\n                if (distance < INNER_RADIUS + ANTIALIASING_WIDTH) {\n                    weight = (distance - INNER_RADIUS + ANTIALIASING_WIDTH * 0.5) / ANTIALIASING_WIDTH;\n                }\n                // Outer boundary of ring\n                else if (distance > OUTER_RADIUS - ANTIALIASING_WIDTH) {\n                    weight = (OUTER_RADIUS + ANTIALIASING_WIDTH * 0.5 - distance) / ANTIALIASING_WIDTH;\n                }\n                else {\n                    weight = 1.0;\n                }\n                \n                weight = clamp(weight, 0.0, 1.0);\n\n                // Use the same pixel the kernel for this call to activation function is using\n                let channelValue = pixel[activationContext.channel];\n                sum += channelValue * weight;\n                totalWeight += weight;\n            }\n        }\n    }\n    \n    return select(0.0, sum / totalWeight, totalWeight > 0.0);\n}\n\nfn activation(x: f32) -> f32 {\n    // x is the convolution result (inner region)\n    // Normalize by kernel area to get the filling ratio\n    let innerFilling = x / f32(KERNEL_AREA);\n    \n    // Calculate neighborhood filling (outer region)\n    let outerFilling = calculateNeighborhood(activationContext.gid);\n    \n    // Apply SmoothLife transition function\n    let n = outerFilling;\n    let m = innerFilling;\n    \n    // Calculate birth and death thresholds based on the current cell state\n    let birthThreshold1 = sigmaMix(BIRTH_1, DEATH_1, m, ALPHA_M);\n    let birthThreshold2 = sigmaMix(BIRTH_2, DEATH_2, m, ALPHA_M);\n    \n    // Apply the transition function\n    let result = sigma2(n, birthThreshold1, birthThreshold2, ALPHA_N);\n\n    // For discrete time stepping, return the result directly\n    // For continuous time stepping, this would be: m + dt * (2*birthSignal - 1)\n    return clamp(m + (DELTA_T * (2 * result - 1)), 0.0, 1.0);\n}",
   "normalize": false
 }

@@ -340,6 +340,6 @@
       ]
     ]
   ],
-  "activationCode": "fn activation(x: f32) -> f32 {\n    return select(exp(x) - 1.0, x, x >= 0.0);\n}",
+  "activationCode": "const MODIFIER: f32 = 1; @variable -2.0 2.0\n\nfn activation(x: f32) -> f32 {\n    return select(exp(x) - MODIFIER, x, x >= 0.0);\n}",
   "normalize": true
 }

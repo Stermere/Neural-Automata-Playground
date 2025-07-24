@@ -12,7 +12,7 @@ import { BASE_ACTIVATIONS } from './constants/baseActivations.ts';
 import NeuralAutomataIntroduction from './widgets/NeuralAutomataIntroduction.tsx';
 import { DEFAULT_CONFIG } from "./constants/filenameConstants";
 import ActivationVariableEditor from './widgets/ActivationVariableEditor.tsx';
-import { ActivationVariableUtils } from './utils/ActivationVariableUtils.ts';
+import { ActivationVariable, ActivationVariableUtils, VariableValue } from './utils/ActivationVariableUtils.ts';
 
 const SIZE: [number, number] = [1024, 1024];
 
@@ -135,9 +135,10 @@ export default function WebGPUNeuralAutomata(): JSX.Element {
   }, [zoom]);
 
   const handleConfigLoad = (updatedWeights: number[][][][], updatedActivation: { code: string; normalize: boolean, computeKernel: boolean }) => {
-    setActivationVariables(ActivationVariableUtils.getDefaultVariableValues(ActivationVariableUtils.getVariables(updatedActivation.code)));
+    const activationVariables = ActivationVariableUtils.getDefaultVariableValues(ActivationVariableUtils.getVariables(updatedActivation.code))
+    setActivationVariables(activationVariables);
     handleWeightChange(updatedWeights);
-    handleActivationChange(updatedActivation);
+    handleActivationChange(updatedActivation, activationVariables);
   };
 
   const handleWeightChange = (updatedWeights: number[][][][]) => {
@@ -145,11 +146,11 @@ export default function WebGPUNeuralAutomata(): JSX.Element {
     controllerRef.current?.updateWeights(updatedWeights.flat(3));
   };
 
-  const handleActivationChange = (updatedActivation: { code: string; normalize: boolean, computeKernel?: boolean }) => {
+  const handleActivationChange = (updatedActivation: { code: string; normalize: boolean, computeKernel?: boolean }, activationVariablesConfig?: VariableValue[]) => {
     setActivationCode(updatedActivation.code);
     setNormalize(updatedActivation.normalize);
     controllerRef.current?.setActivationParameters(updatedActivation.normalize, updatedActivation.computeKernel);
-    controllerRef.current?.setActivationFunctionCode(ActivationVariableUtils.transformActivationCode(updatedActivation.code, activationVariables));
+    controllerRef.current?.setActivationFunctionCode(ActivationVariableUtils.transformActivationCode(updatedActivation.code, activationVariablesConfig ?? activationVariables));
   }
 
   const handleActivationVariableChange = (code: string) => {

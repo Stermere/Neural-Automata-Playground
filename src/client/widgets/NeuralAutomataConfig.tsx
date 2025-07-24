@@ -86,8 +86,9 @@ export default function NeuralAutomataConfig({ weights, activationCode, normaliz
   };
 
   const handleExport = () => {
+    const activationCodeUpdated = ActivationVariableUtils.updateDefaults(activationCode, activationVariables);
     const blob = new Blob(
-      [JSON.stringify({ weights, activationCode, normalize }, null, 2)],
+      [JSON.stringify({ weights, activationCode: activationCodeUpdated, normalize }, null, 2)],
       { type: 'application/json' }
     );
     const url = URL.createObjectURL(blob);
