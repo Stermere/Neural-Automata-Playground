@@ -1,10 +1,10 @@
 import ReactMarkdown from 'react-markdown';
-import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
-import { oneDark } from 'react-syntax-highlighter/dist/esm/styles/prism';
+import { PrismLight as SyntaxHighlighter } from 'react-syntax-highlighter';
+import oneDark from 'react-syntax-highlighter/dist/esm/styles/prism/one-dark';
 
 import styles from './styles/neuralAutomataIntroduction.module.css';
 import neuralAutomataIntro from '../assets/neuralAutomataIntro.md?raw';
-import convolutionDiagram from '../assets/convolutionDiagram.png';
+import convolutionDiagram from '/convolutionDiagram.png?url';
 
 export default function NeuralAutomataIntroduction() {
   return (
@@ -27,7 +27,7 @@ export default function NeuralAutomataIntroduction() {
       >
         {neuralAutomataIntro}
       </ReactMarkdown>
-      <img className={styles.math} src={convolutionDiagram} />
+      <img className={styles.math} src={convolutionDiagram} loading="lazy"/>
     </div>
   );
 }
