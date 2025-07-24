@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { useDebounce } from '../hooks/useDebounce';
 import styles from './styles/activationVariableEditor.module.css';
 import { ActivationVariableUtils, ActivationVariable, VariableValue } from '../utils/ActivationVariableUtils';
+import ReactMarkdown from 'react-markdown';
 
 interface ActivationVariableEditorProps {
   code: string;
@@ -11,7 +12,7 @@ interface ActivationVariableEditorProps {
 }
 
 export default function ActivationVariableEditor({ code, values, setValues, onVariableChange }: ActivationVariableEditorProps) {
-  const [variables, setVariables] = useState<ActivationVariable[]>([]);
+  const [variables, setVariables] = useState<ActivationVariable[]>(ActivationVariableUtils.getVariables(code));
 
   const debouncedValues = useDebounce(values, 100);
 
@@ -45,6 +46,14 @@ export default function ActivationVariableEditor({ code, values, setValues, onVa
 
   return (
     <div className={styles.container}>
+      {variables.length == 0 ? (
+        <div className={styles.warning}>
+          <ReactMarkdown>
+            {`**No adjustable variables found.**`}
+          </ReactMarkdown>
+        </div>
+      ) : null}
+
       {variables.map((v) => {
         const currentValue = values.find((val) => val.name === v.name)?.value ?? v.default;
         return (

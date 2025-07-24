@@ -19,12 +19,27 @@ You can think of each pixel as a small, independent unit that reacts to its surr
 - **Preset library**: Choose from built‑in activations like Linear, ELU, Softsign, Swish, Mish, Inverse Gaussian, and more.
 - **Live updates**: Instantly compile and swap in new activation logic without reloading the page.
 
+### Variable Parameters
+- **Dynamic tuning**: Mark constants in your WGSL code as adjustable parameters.
+- **Interactive sliders**: Automatically get UI sliders for each marked variable, enabling live tuning without code changes.
+- **Saved State**: When saving or exporting, the current state of the parameters are persisted in that save.
+
 ### General Features
 - **WebGPU acceleration**: All cellular updates run as compute shaders for high performance and scalability.
 - **Brush controls**: Paint initial conditions or perturb existing patterns with left click.
 - **Canvas controls**: Drag the canvas with right click and zoom with mousewheel.
 - **Save & load**: Store and recall any combination of weights + activation in your browser’s localStorage.
 - **Import/export**: Download your configurations as JSON files or upload your own to share and collaborate.
+
+## Parameter Tagging **@variable**
+
+Using This **@variable** annotation lets you turn fixed constants in your WGSL activation code into **Variable Parameters**. You must specify a min and max and the type must be **const f32**.
+
+**Syntax example:**
+
+```wgsl
+const VARIABLE: f32 = 0.2; @variable 0.0 1.0
+```
 
 ---
 ## Activation Context
@@ -37,10 +52,6 @@ struct ActivationContext {
 }
 
 var<private> activationContext: ActivationContext;
-
-fn activation(x: f32) -> f32 {
-    return x;
-}
 ```
 This construct is globally scoped and available for use within the activation function enabling more complex activation functions.
 
