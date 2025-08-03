@@ -3,11 +3,17 @@ import styles from './styles/contentSwitcher.module.css';
 
 interface ContentSwitcherProps {
   labels: string[];
+  setSelectedIndex?: (number) => void;
   children: React.ReactNode[];
 }
 
-export default function ContentSwitcher({ labels, children }: ContentSwitcherProps) {
+export default function ContentSwitcher({ labels, setSelectedIndex, children }: ContentSwitcherProps) {
   const [activeIndex, setActiveIndex] = useState(0);
+
+  const updateActiveIndex = (index) => {
+    setActiveIndex(index);
+    setSelectedIndex ? setSelectedIndex(index) : null;
+  };
 
   return (
     <div className={styles.switcherContainer}>
@@ -17,7 +23,7 @@ export default function ContentSwitcher({ labels, children }: ContentSwitcherPro
             <button
               key={idx}
               className={`${styles.switchButton} ${idx === activeIndex ? styles.switchButtonActive : ''}`}
-              onClick={() => setActiveIndex(idx)}
+              onClick={() => updateActiveIndex(idx)}
             >
               {label}
             </button>

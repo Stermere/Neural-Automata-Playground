@@ -18,9 +18,9 @@ fn vs(@builtin(vertex_index) i : u32)
 @group(0) @binding(1) var linearSampler : sampler;
 
 @fragment
-fn fs(@builtin(position) coord : vec4<f32>)
-    -> @location(0) vec4<f32> {
-    let uv = coord.xy / vec2<f32>(1024.0, 1024.0);
-    // use our sampler here
+fn fs(@builtin(position) coord : vec4<f32>)-> @location(0) vec4<f32> {
+    let texSize = textureDimensions(img);
+    let uv = coord.xy / vec2<f32>(texSize);
+    
     return textureSample(img, linearSampler, uv);
 }

@@ -1,6 +1,6 @@
 // Constants
-const WIDTH: u32 = 1024u;
-const HEIGHT: u32 = 1024u;
+const WIDTH: u32 = @sizeWidthu;
+const HEIGHT: u32 = @sizeHeightu;
 const KERNEL_SIZE: i32 = 5;
 const HALF_KERNEL: i32 = KERNEL_SIZE / 2;
 const CHANNEL_COUNT: u32 = 3u;

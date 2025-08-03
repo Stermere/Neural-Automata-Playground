@@ -13,6 +13,7 @@ export interface AutomataConfig {
   brushRadius?: number;
   maxFps?: number;
   paused?: boolean;
+  isDraggable?: boolean;
 }
 
 export class WebGPUNeuralAutomataController {
@@ -31,6 +32,7 @@ export class WebGPUNeuralAutomataController {
   private computePipeline!: GPUComputePipeline;
   private renderPipeline!: GPURenderPipeline;
 
+  private gridSize: [number, number];
   private animationId = 0;
   private drawing = false;
   private brushRadius: number;
@@ -54,15 +56,19 @@ export class WebGPUNeuralAutomataController {
   private lastClickX: number = 0;
   private lastClickY: number = 0;
 
+  private isDraggable = true;
+
   constructor(private config: AutomataConfig) {
     this.brushRadius = config.brushRadius ?? 20;
     this.maxFps = config.maxFps ?? 240;
     this.frameInterval = 1000 / this.maxFps;
     this.paused = config.paused ?? false;
+    this.gridSize = config.gridSize;
+    this.isDraggable = config.isDraggable ?? true;
   }
 
   async init(): Promise<void> {
-    const { canvas, gridSize } = this.config;
+    const { canvas } = this.config;
     if (!navigator.gpu) throw new Error('WebGPU not supported');
     const adapter = await navigator.gpu.requestAdapter();
     this.device = await adapter!.requestDevice();
@@ -71,8 +77,8 @@ export class WebGPUNeuralAutomataController {
     this.sampler = this.device.createSampler({ magFilter: 'nearest', minFilter: 'nearest' });
 
     // Textures
-    this.texA = this.createTexture(gridSize);
-    this.texB = this.createTexture(gridSize);
+    this.texA = this.createTexture(this.gridSize);
+    this.texB = this.createTexture(this.gridSize);
 
     // Weights
     this.weightBuffer = this.createWeights();
@@ -90,10 +96,10 @@ export class WebGPUNeuralAutomataController {
     this.updateRenderBind();
 
     // Mouse events
-    this.setupMouse(canvas, gridSize);
+    this.setupMouse(canvas, this.gridSize);
 
     // Start loop
-    this.startLoop(gridSize);
+    this.startLoop(this.gridSize);
   }
 
   updateWeights(flatWeights: number[]) {
@@ -160,6 +166,21 @@ export class WebGPUNeuralAutomataController {
 
   togglePaused(paused: boolean): void {
     this.paused = paused;
+  }
+
+  setZoom(zoomLevel: number, transformTranslation?: string): void {
+    const canvas = this.config.canvas;
+    if (canvas) {
+      if (transformTranslation) {
+        const currentTransform = canvas.style.transform || '';
+        const transformWithoutTranslation = currentTransform.replace(/translate\([^)]*\)/g, '');
+        canvas.style.transform = `${transformWithoutTranslation} ${transformTranslation}`.trim();
+      }
+
+      const currentTransform = canvas.style.transform || '';
+      const transformWithoutScale = currentTransform.replace(/scale\([^)]*\)/g, '');
+      canvas.style.transform = `${transformWithoutScale} scale(${zoomLevel})`.trim();
+    }
   }
 
   private createWeights(): GPUBuffer {
@@ -236,7 +257,13 @@ export class WebGPUNeuralAutomataController {
     ).replace(
       '@computeKernelFlag',
       this.computeKernel ? COMPUTE_KERNEL_TRUE : COMPUTE_KERNEL_FALSE,
-    )
+    ).replace(
+      '@sizeWidth',
+      this.gridSize[0],
+    ).replace(
+      '@sizeHeight',
+      this.gridSize[1],
+    );
   }
 
   private makeBindGroup(src: GPUTexture, dst: GPUTexture): GPUBindGroup {
@@ -304,7 +331,7 @@ export class WebGPUNeuralAutomataController {
     };
 
     const handleMove = (e: MouseEvent | TouchEvent) => {
-      if (e instanceof MouseEvent && this.isDragging) {
+      if (e instanceof MouseEvent && this.isDragging && this.isDraggable) {
         const newPanX = e.clientX - this.dragStart.x;
         const newPanY = e.clientY - this.dragStart.y;
         this.panOffset = { x: newPanX, y: newPanY };
@@ -366,7 +393,11 @@ export class WebGPUNeuralAutomataController {
   }
 
   private paintCell(gx: number, gy: number): void {
-    const [w, h] = this.config.gridSize;
+    if (!this.device || !this.texA || !this.texB) {
+      return
+    }
+
+    const [w, h] = this.gridSize;
     
     const minX = Math.max(0, gx - this.brushRadius);
     const maxX = Math.min(w - 1, gx + this.brushRadius);
@@ -454,6 +485,37 @@ export class WebGPUNeuralAutomataController {
   }
 
   destroy(): void {
-    cancelAnimationFrame(this.animationId);
+    // Cancel animation frame
+    if (this.animationId) {
+      cancelAnimationFrame(this.animationId);
+      this.animationId = 0;
+    }
+
+    // Destroy GPU buffers
+    if (this.weightBuffer) {
+      this.weightBuffer.destroy();
+      this.weightBuffer = undefined as any;
+    }
+    if (this.timestepBuffer) {
+      this.timestepBuffer.destroy();
+      this.timestepBuffer = undefined as any;
+    }
+
+    // Destroy textures
+    if (this.texA) {
+      this.texA.destroy();
+      this.texA = undefined as any;
+    }
+    if (this.texB) {
+      this.texB.destroy();
+      this.texB = undefined as any;
+    }
+
+    // Clear other references
+    this.bindA = undefined as any;
+    this.bindB = undefined as any;
+    this.renderBind = undefined as any;
+    this.computePipeline = undefined as any;
+    this.renderPipeline = undefined as any;
   }
 }

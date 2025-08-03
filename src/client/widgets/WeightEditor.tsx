@@ -155,7 +155,7 @@ export default function WeightEditor({ weights, onWeightUpdate }: WeightEditorPr
                               key={colIdx}
                               type="number"
                               inputMode="decimal"
-                              value={val}
+                              value={val.toFixed(2)}
                               className={styles.weightInput}
                               step={0.1}
                               onChange={e => {
