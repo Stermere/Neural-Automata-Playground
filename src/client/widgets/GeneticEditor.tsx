@@ -15,8 +15,8 @@ export default function GeneticEditor({ controller, showMutation, showMutations 
   const mutationRate = Math.pow(10, sliderValue);
 
   const [mutationProb, setMutationProb] = useState(0.05);
-  const [topN1, setTopN1] = useState(4);
-  const [topN2, setTopN2] = useState(4);
+  const [topN1, setTopN1] = useState(1);
+  const [topN2, setTopN2] = useState(2); 
   const [crossoverRatio, setCrossoverRatio] = useState(0.9);
 
   const [candidates, setCandidates] = useState<GeneticCandidate[]>([]);

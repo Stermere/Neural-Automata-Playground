@@ -48,7 +48,10 @@ struct ActivationContext {
     gid: vec3<u32>,
     weightSum: f32,
     cellState: vec3<f32>,
-    channel: u32
+    channel: u32,
+    timestep: f32,
+    clickX: f32,
+    clickY: f32
 }
 
 var<private> activationContext: ActivationContext;
@@ -59,6 +62,9 @@ This construct is globally scoped and available for use within the activation fu
 - **weightSum**: This is the sum of all the weights while calculating x.
 - **cellState**: this is the pixel values of the current gid, cellState.r yields the red value of the pixel.
 - **channel**: This is the channel whose value is being calculated via the current call to activationFunction. Channel takes on the values 0, 1, and 2 corresponding to r, g, and b.
+- **timestep**: This is the current timestep of the simulation, it starts at 0 and increments by 1 every time the simulation is updated.
+- **clickX**: This is the x coordinate of the last click on the canvas.
+- **clickY**: This is the y coordinate of the last click on the canvas.
 
 ---
 

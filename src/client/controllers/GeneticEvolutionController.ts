@@ -24,8 +24,8 @@ export class GeneticEvolutionController implements IGeneticEvolutionController  
   private populationSize = 32;
   private mutationIntensity = 1.0;
   private mutationProbability = 0.05;
-  private topNParent1 = 4;
-  private topNParent2 = 4;
+  private topNParent1 = 1;
+  private topNParent2 = 2;
   private crossoverRatio = 0.9;
 
   private currentPopulation: ScoredCandidate[] = [];

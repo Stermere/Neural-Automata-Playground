@@ -38,7 +38,7 @@ export class WebGPUNeuralAutomataController {
   private brushRadius: number;
 
   private baseShaderCode = computeShaderCode;
-  private activationCode = BASE_ACTIVATIONS.Linear;
+  private activationCode = BASE_ACTIVATIONS["Exponential Linear Unit"];
   private normalizeInput = false;
   private computeKernel = true;
 
@@ -153,6 +153,10 @@ export class WebGPUNeuralAutomataController {
     this.device.queue.writeTexture({ texture: this.texA, origin: [0, 0, 0] }, pixels, layout, size);
     this.device.queue.writeTexture({ texture: this.texB, origin: [0, 0, 0] }, pixels, layout, size);
     this.timestep = 0;
+  }
+
+  dotCanvasCenter(): void {
+    this.paintCell(this.gridSize[0] / 2, this.gridSize[1] / 2);
   }
 
   setMaxFps(fps: number): void {
