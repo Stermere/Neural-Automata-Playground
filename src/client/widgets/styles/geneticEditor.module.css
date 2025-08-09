@@ -12,15 +12,17 @@
 }
 
 .ratingButtons {
-  display: flex;
+  display: grid;
+  max-width: 20rem;
+  grid-template-columns: repeat(2, 1fr);
   gap: 1rem;
   margin-bottom: 1rem;
 }
 
 .label {
+  flex-shrink: 0;
   color: #cfcfcf;
   font-size: 0.875rem;
-  margin: 0.5rem 0;
 }
 
 .ratingButton {

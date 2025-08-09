@@ -26,6 +26,10 @@ export interface IGeneticEvolutionController {
   getStatus(): string;
   presentNext(): GeneticCandidate[];
   setMutationRate(rate: number): void;
+  setMutationProbability(prob: number): void;
+  setTopNParent1(count: number): void;
+  setTopNParent2(count: number): void;
+  setCrossoverRatio(ratio: number): void;
   setActivationFunctionCode(newCode: string): void;
   updateWeights(newWeights: number[][][][]): void;
   setActivationVariables(newVars: VariableValue[]): void;

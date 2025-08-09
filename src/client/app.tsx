@@ -215,7 +215,7 @@ export default function WebGPUNeuralAutomata(): JSX.Element {
           ref={geneticGridRef}
           activationCode={activationCode}
           normalize={normalizeInputToActivation}
-          weights={weights}
+          geneticEvolutionControllerRef={geneticEvolutionControllerRef}
         />
       )}
       <div className={styles.controlContainer}>

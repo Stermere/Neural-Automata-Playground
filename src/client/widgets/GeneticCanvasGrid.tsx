@@ -2,7 +2,7 @@ import { useEffect, useRef, forwardRef, useImperativeHandle, useState } from 're
 import { WebGPUNeuralAutomataController, AutomataConfig } from '../controllers/WebGPUAutomataController';
 import { ActivationVariableUtils, VariableValue } from '../utils/ActivationVariableUtils';
 import styles from './styles/geneticCanvasGrid.module.css';
-import { GeneticCandidate } from '../controllers/GeneticEvolutionController';
+import { GeneticCandidate, GeneticEvolutionController } from '../controllers/GeneticEvolutionController';
 
 export interface GeneticCanvasGridRef {
   updateAllPanels: (candidates: GeneticCandidate[], code?: string, normalize?: boolean, computeKernel?: boolean) => void;
@@ -11,11 +11,11 @@ export interface GeneticCanvasGridRef {
 interface GeneticCanvasGridProps {
   activationCode: string;
   normalize: boolean;
-  weights: number[][][][];
+  geneticEvolutionControllerRef: React.RefObject<GeneticEvolutionController | null>
 }
 
 export const GeneticCanvasGrid = forwardRef<GeneticCanvasGridRef, GeneticCanvasGridProps>(
-  ({ activationCode, normalize, weights }, ref) => {
+  ({ activationCode, normalize, geneticEvolutionControllerRef }, ref) => {
     const canvasRefs = useRef<(HTMLCanvasElement | null)[]>([null, null, null, null]);
     const controllerRefs = useRef<(WebGPUNeuralAutomataController | null)[]>([null, null, null, null]);
     const [translation, setTranslation] = useState({ x: 0, y: 0 });
@@ -45,6 +45,9 @@ export const GeneticCanvasGrid = forwardRef<GeneticCanvasGridRef, GeneticCanvasG
       let isMounted = true;
       
       const initializeControllers = async () => {
+        const canidates = geneticEvolutionControllerRef.current?.presentNext();
+        if (!canidates) return;
+
         for (let i = 0; i < 4; i++) {
           if (!isMounted) {
             return;
@@ -63,6 +66,7 @@ export const GeneticCanvasGrid = forwardRef<GeneticCanvasGridRef, GeneticCanvasG
           };
 
           const controller = new WebGPUNeuralAutomataController(config);
+          const canidate = canidates[i];
           
           try {
             await controller.init();
@@ -74,8 +78,8 @@ export const GeneticCanvasGrid = forwardRef<GeneticCanvasGridRef, GeneticCanvasG
             
             controllerRefs.current[i] = controller;
             controller.setActivationParameters(normalize);
-            controller.updateWeights(weights.flat(3));
-            controller.setActivationFunctionCode(ActivationVariableUtils.transformActivationCodeDefault(activationCode));
+            controller.updateWeights(canidate.weights.flat(3));
+            controller.setActivationFunctionCode(ActivationVariableUtils.transformActivationCode(activationCode, canidate.activationVariables));
             controller.randomizeCanvas();
           } catch (error) {
             console.error(`Failed to initialize controller ${i}:`, error);

@@ -24,6 +24,9 @@ export class GeneticEvolutionController implements IGeneticEvolutionController  
   private populationSize = 32;
   private mutationIntensity = 1.0;
   private mutationProbability = 0.05;
+  private topNParent1 = 4;
+  private topNParent2 = 4;
+  private crossoverRatio = 0.9;
 
   private currentPopulation: ScoredCandidate[] = [];
   private generations: ScoredCandidate[][] = [];
@@ -114,6 +117,22 @@ export class GeneticEvolutionController implements IGeneticEvolutionController  
     }));
   }
 
+  setMutationProbability(prob: number) {
+    this.mutationProbability = Math.max(0, Math.min(1, prob));
+  }
+
+  setTopNParent1(count: number) {
+    this.topNParent1 = Math.max(1, Math.floor(count));
+  }
+
+  setTopNParent2(count: number) {
+    this.topNParent2 = Math.max(1, Math.floor(count));
+  }
+
+  setCrossoverRatio(ratio: number) {
+    this.crossoverRatio = Math.max(0, Math.min(1, ratio));
+  }
+
   async submitChoice(chosenIndex: number): Promise<void> {
     if (chosenIndex < 0 || chosenIndex >= this.currentCandidates.length) throw new Error("Invalid choice index");
 
@@ -162,25 +181,25 @@ export class GeneticEvolutionController implements IGeneticEvolutionController  
     this.generationCount++;
     this.generations.push([...this.currentPopulation]);
 
-    const preset = this.populationSize / 8;
-    const twoParentEnd = preset + (this.populationSize / 8 * 5);
-    const topParentEnd = twoParentEnd + (this.populationSize / 8);
+    const recent = this.history
+      .slice(-this.populationSize)
+      .sort((a, b) => b.score - a.score);
 
-    const recent = this.history.slice(-this.populationSize).sort((a, b) => b.score - a.score);
-    const top = recent.slice(0, Math.floor(this.populationSize / 8));
+    const top1 = recent.slice(0, this.topNParent1);
+    const top2 = recent.slice(0, this.topNParent2);
 
     const newPop: ScoredCandidate[] = [];
-    newPop.push(...top);
+    newPop.push(...top1);
 
     while (newPop.length < this.populationSize) {
-      if (newPop.length < twoParentEnd && top.length > 1) {
-        const p1 = this.selectParent(top);
-        const p2 = this.selectParent(top);
+      if (top1.length > 0 && top2.length > 0) {
+        const p1 = this.selectParent(top1);
+        const p2 = this.selectParent(top2);
         const child = this.crossover(p1, p2);
         newPop.push(this.mutate(child));
-      } else if (this.bestCandidate && newPop.length < topParentEnd) {
-        newPop.push(this.mutate({ weights: this.bestCandidate.weights, activationVariables: this.bestCandidate.activationVariables }));
-      } else newPop.push(this.makeRandomCandidate());
+      } else {
+        newPop.push(this.makeRandomCandidate());
+      }
     }
 
     this.currentPopulation = newPop;
@@ -193,8 +212,26 @@ export class GeneticEvolutionController implements IGeneticEvolutionController  
   }
 
   private crossover(p1: ScoredCandidate, p2: ScoredCandidate): ScoredCandidate {
-    const weights = p1.weights.map((c, i) => c.map((k, j) => k.map((r, m) => r.map((_, n) => (Math.random() < 0.9 ? p1.weights[i][j][m][n] : p2.weights[i][j][m][n])))));
-    const activationVariables = p1.activationVariables.map((v, i) => ({ name: v.name, value: Math.random() < 0.9 ? v.value : p2.activationVariables[i].value }));
+    const weights = p1.weights.map((c, i) =>
+      c.map((k, j) =>
+        k.map((r, m) =>
+          r.map((_, n) =>
+            Math.random() < this.crossoverRatio
+              ? p1.weights[i][j][m][n]
+              : p2.weights[i][j][m][n]
+          )
+        )
+      )
+    );
+
+    const activationVariables = p1.activationVariables.map((v, i) => ({
+      name: v.name,
+      value:
+        Math.random() < this.crossoverRatio
+          ? v.value
+          : p2.activationVariables[i].value,
+    }));
+
     return { weights, activationVariables, score: 0 };
   }
 
@@ -213,7 +250,7 @@ export class GeneticEvolutionController implements IGeneticEvolutionController  
   private mutateWeights(weights: number[][][][]): number[][][][] {
     return weights.map(channel => channel.map(kernel => kernel.map(row => row.map(w => (Math.random() < this.mutationProbability ? this.roundToSigFigs(w + this.gaussianRandom(0, this.mutationIntensity), 2) : w)))));
   }
-
+  
   private gaussianRandom(mean = 0, stdev = 1): number {
     const u = 1 - Math.random();
     const v = Math.random();
