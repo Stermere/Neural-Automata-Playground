@@ -1,9 +1,10 @@
-import { DEFAULT_CONFIG } from "../constants/filenameConstants";
+import { DEFAULT_CONFIG, PREWARM_CONFIG } from "../constants/filenameConstants";
 
 export type ConfigData = {
   weights: number[][][][];
   activationCode: string;
   normalize: boolean;
+  computeKernel: boolean;
 };
 
 const configModules = import.meta.glob('../constants/defaultConfigs/*.json', { eager: true });
@@ -20,11 +21,7 @@ export class DefaultConfigController {
     return Object.keys(this.configMap);
   }
 
-  static getConfig(name: string): ConfigData | undefined {
+  static getConfig(name: string): ConfigData {
     return this.configMap[name];
-  }
-
-  static getDefault(): ConfigData {
-    return this.getConfig(DEFAULT_CONFIG) ?? Object.values(this.configMap)[0];
   }
 }

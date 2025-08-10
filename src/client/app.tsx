@@ -10,7 +10,7 @@ import { DefaultConfigController } from './controllers/DefaultConfigController.t
 import { LOCAL_STORAGE_CONFIG_NAME } from './constants/filenameConstants.ts';
 import { BASE_ACTIVATIONS } from './constants/baseActivations.ts';
 import NeuralAutomataIntroduction from './widgets/NeuralAutomataIntroduction.tsx';
-import { DEFAULT_CONFIG } from "./constants/filenameConstants";
+import { DEFAULT_CONFIG, PREWARM_CONFIG } from "./constants/filenameConstants";
 import ActivationVariableEditor from './widgets/ActivationVariableEditor.tsx';
 import { ActivationVariableUtils, VariableValue } from './utils/ActivationVariableUtils.ts';
 import GeneticEditor from './widgets/GeneticEditor.tsx';
@@ -25,12 +25,13 @@ export default function WebGPUNeuralAutomata(): JSX.Element {
   const geneticEvolutionControllerRef = useRef<GeneticEvolutionController | null>(null);
   const geneticGridRef = useRef<GeneticCanvasGridRef>(null);
   const initialized = useRef(false);
-  const initialConfig = DefaultConfigController.getDefault()
+  const preWarmConfig = DefaultConfigController.getConfig(PREWARM_CONFIG)
+  const initialConfig = DefaultConfigController.getConfig(DEFAULT_CONFIG)
   
-  const [weights, setWeights] = useState(initialConfig.weights);
-  const [activationCode, setActivationCode] = useState(initialConfig.activationCode);
-  const [activationVariables, setActivationVariables] = useState(ActivationVariableUtils.getDefaultVariableValues(ActivationVariableUtils.getVariables(initialConfig.activationCode)));
-  const [normalizeInputToActivation, setNormalize] = useState(initialConfig.normalize);
+  const [weights, setWeights] = useState(preWarmConfig.weights);
+  const [activationCode, setActivationCode] = useState(preWarmConfig.activationCode);
+  const [activationVariables, setActivationVariables] = useState(ActivationVariableUtils.getDefaultVariableValues(ActivationVariableUtils.getVariables(preWarmConfig.activationCode)));
+  const [normalizeInputToActivation, setNormalize] = useState(preWarmConfig.normalize);
   const [zoom, setZoom] = useState(1);
   const [selectedTabIndex, setSelectedTabIndex] = useState(0);
   const viewMode = selectedTabIndex === 4 ? 'genetic' : 'single';
@@ -56,11 +57,21 @@ export default function WebGPUNeuralAutomata(): JSX.Element {
     geneticController.init().catch(console.error);
 
     controller.init().then(async () => {
-      controller.updateWeights(initialConfig.weights.flat(3));
-      controller.setActivationParameters(initialConfig.normalize);
-      controller.setActivationFunctionCode(ActivationVariableUtils.transformActivationCodeDefault(initialConfig.activationCode));
+      controller.updateWeights(preWarmConfig.weights.flat(3));
+      controller.setActivationParameters(preWarmConfig.normalize);
+      controller.setActivationFunctionCode(ActivationVariableUtils.transformActivationCodeDefault(preWarmConfig.activationCode));
       controller.randomizeCanvas();
     }).catch(console.error);
+
+
+    // Switches to a different pattern after pre warming the canvas content
+    setTimeout(() => {
+      handleConfigLoad(initialConfig.weights, {
+        code: initialConfig.activationCode,
+        normalize: initialConfig.normalize,
+        computeKernel: initialConfig.computeKernel,
+      })
+    }, 500);
 
     return () => {
       controllerRef.current?.destroy();
@@ -68,13 +79,20 @@ export default function WebGPUNeuralAutomata(): JSX.Element {
   }, []);
 
   useEffect(() => {
-    const defaultKey = `${LOCAL_STORAGE_CONFIG_NAME}${DEFAULT_CONFIG}`;
-    const firstRun = !localStorage.getItem(defaultKey);
-    for (const [name, config] of Object.entries(DefaultConfigController.configMap)) {
-      localStorage.setItem(`${LOCAL_STORAGE_CONFIG_NAME}${name}`, JSON.stringify(config));
-    }
-    
-    if (firstRun) {
+    // Get all config keys that should exist
+    const configKeys = Object.keys(DefaultConfigController.configMap)
+      .map(name => `${LOCAL_STORAGE_CONFIG_NAME}${name}`);
+
+    // Check if all keys exist in localStorage
+    const allExist = configKeys.every(key => localStorage.getItem(key) !== null);
+
+    if (!allExist) {
+      // If any key is missing, set all configs
+      for (const [name, config] of Object.entries(DefaultConfigController.configMap)) {
+        localStorage.setItem(`${LOCAL_STORAGE_CONFIG_NAME}${name}`, JSON.stringify(config));
+      }
+
+      // Reload page after initial setup
       window.location.reload();
     }
   }, []);
