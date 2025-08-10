@@ -155,8 +155,43 @@ export class WebGPUNeuralAutomataController {
     this.timestep = 0;
   }
 
-  dotCanvasCenter(): void {
-    this.paintCell(this.gridSize[0] / 2, this.gridSize[1] / 2);
+  paintBoarders(): void {
+    const [w, h] = this.gridSize;
+    const total = w * h;
+    const pixels = new Uint8Array(total * 4);
+    const borderThickness = this.brushRadius; // Use brush radius for thickness
+
+    // Fill background black (RGB=0) with alpha=255
+    for (let i = 0; i < total; i++) {
+      pixels[i * 4 + 0] = 0;
+      pixels[i * 4 + 1] = 0;
+      pixels[i * 4 + 2] = 0;
+      pixels[i * 4 + 3] = 255;
+    }
+
+    // Fill border pixels white (RGB=255)
+    for (let y = 0; y < h; y++) {
+      for (let x = 0; x < w; x++) {
+        const onTopEdge = y < borderThickness;
+        const onBottomEdge = y >= h - borderThickness;
+        const onLeftEdge = x < borderThickness;
+        const onRightEdge = x >= w - borderThickness;
+
+        if (onTopEdge || onBottomEdge || onLeftEdge || onRightEdge) {
+          const idx = (y * w + x) * 4;
+          pixels[idx + 0] = 255;
+          pixels[idx + 1] = 255;
+          pixels[idx + 2] = 255;
+          pixels[idx + 3] = 255;
+        }
+      }
+    }
+
+    const layout = { bytesPerRow: w * 4 };
+    const size = [w, h, 1];
+
+    this.device.queue.writeTexture({ texture: this.texA, origin: [0, 0, 0] }, pixels, layout, size);
+    this.device.queue.writeTexture({ texture: this.texB, origin: [0, 0, 0] }, pixels, layout, size);
   }
 
   setMaxFps(fps: number): void {

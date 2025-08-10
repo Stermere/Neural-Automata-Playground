@@ -185,8 +185,14 @@ export default function WebGPUNeuralAutomata(): JSX.Element {
       geneticGridRef.current?.updateAllPanels(geneticEvolutionControllerRef.current?.presentNext(), updatedActivation.code, updatedActivation.normalize, updatedActivation.computeKernel) : null;
   }
 
-  const handleActivationVariableChange = (code: string) => {
+  const handleApplyActivationVariableChange = (code: string) => {
     controllerRef.current?.setActivationFunctionCode(code);
+  }
+
+  const handleSetActivationVariables = (values: VariableValue[]) => {
+    geneticEvolutionControllerRef.current?.setActivationVariables(values);
+    geneticEvolutionControllerRef.current?.init();
+    setActivationVariables(values);
   }
 
   const handleZoomChange = (newZoom: number) => {
@@ -251,8 +257,8 @@ export default function WebGPUNeuralAutomata(): JSX.Element {
           <ActivationVariableEditor
             code={activationCode}
             values={activationVariables}
-            setValues={setActivationVariables}
-            onVariableChange={handleActivationVariableChange}
+            setValues={handleSetActivationVariables}
+            onVariableChange={handleApplyActivationVariableChange}
           />
           <GeneticEditor
             controller={geneticEvolutionControllerRef.current}

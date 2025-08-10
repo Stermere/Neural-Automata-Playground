@@ -36,7 +36,7 @@ export const GeneticCanvasGrid = forwardRef<GeneticCanvasGridRef, GeneticCanvasG
             (normalize !== undefined) ? controller.setActivationParameters(normalize, computeKernel) : null;
             controller.setActivationFunctionCode(ActivationVariableUtils.transformActivationCode(code ?? activationCode, candidate.activationVariables));
             controller.clearCanvas();
-            controller.dotCanvasCenter();
+            controller.paintBoarders();
           }
         });
       }
@@ -81,7 +81,7 @@ export const GeneticCanvasGrid = forwardRef<GeneticCanvasGridRef, GeneticCanvasG
             controller.setActivationParameters(normalize);
             controller.updateWeights(canidate.weights.flat(3));
             controller.setActivationFunctionCode(ActivationVariableUtils.transformActivationCode(activationCode, canidate.activationVariables));
-            controller.dotCanvasCenter()
+            controller.paintBoarders()
           } catch (error) {
             console.error(`Failed to initialize controller ${i}:`, error);
             controller?.destroy();

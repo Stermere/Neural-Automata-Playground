@@ -11,14 +11,6 @@
   font-family: sans-serif;
 }
 
-.ratingButtons {
-  display: grid;
-  max-width: 20rem;
-  grid-template-columns: repeat(2, 1fr);
-  gap: 1rem;
-  margin-bottom: 1rem;
-}
-
 .label {
   flex-shrink: 0;
   color: #cfcfcf;
@@ -78,15 +70,61 @@
   background-color: #505050;
 }
 
-.slider {
-  cursor: pointer;
-  width: 20%;
-  margin-left: 1rem;
-}
-
 .mutationRateDisplay {
   display: inline-block;
   min-width: 3em;
   text-align: right;
   
+}
+
+.editorGrid {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 2rem;
+  align-items: start;
+}
+
+.leftColumn {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.rightColumn {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.sliderGroup {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.checkboxGroup {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.geneticEditor {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 2rem;
+  align-items: start;
+}
+
+/* Left column (favorite selection) */
+.ratingButtons {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 0.5rem;
+}
+
+/* Make sliders fill the right column nicely */
+.slider {
+  cursor: pointer;
+  width: 40%;
+  margin: 0;
 }

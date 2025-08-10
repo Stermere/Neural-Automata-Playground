@@ -36,4 +36,8 @@ export interface IGeneticEvolutionController {
   generateRandomGeneration(): GeneticCandidate[];
   generateGeneration(): void;
   submitChoice(chosenIndex: number): Promise<void>;
+  setMutateWeightsEnabled(enabled: boolean): void;
+  setMutateVarsEnabled(enabled: boolean): void;
+  setCrossoverWeightsEnabled(enabled: boolean): void;
+  setCrossoverVarsEnabled(enabled: boolean): void;
 }

@@ -43,6 +43,11 @@ export class GeneticEvolutionController implements IGeneticEvolutionController  
   private baseWeights: number[][][][];
   private baseActivationVariables: VariableValue[];
 
+  private mutateWeightsEnabled = true;
+  private mutateVarsEnabled = true;
+  private crossoverWeightsEnabled = true;
+  private crossoverVarsEnabled = true;
+
   constructor(private config: GeneticEvolutionConfig) {
     this.activationCode = config.activationCode;
     this.baseWeights = config.weights;
@@ -112,7 +117,7 @@ export class GeneticEvolutionController implements IGeneticEvolutionController  
   generateGeneration(): void {
     this.currentPopulation = Array.from({ length: this.populationSize }, () => ({
       weights: this.mutateWeights(this.baseWeights),
-      activationVariables: this.mutateVariables(this.baseActivationVariables),
+      activationVariables: this.baseActivationVariables,
       score: 0,
     }));
   }
@@ -131,6 +136,19 @@ export class GeneticEvolutionController implements IGeneticEvolutionController  
 
   setCrossoverRatio(ratio: number) {
     this.crossoverRatio = Math.max(0, Math.min(1, ratio));
+  }
+
+  setMutateWeightsEnabled(enabled: boolean) {
+    this.mutateWeightsEnabled = enabled;
+  }
+  setMutateVarsEnabled(enabled: boolean) {
+    this.mutateVarsEnabled = enabled;
+  }
+  setCrossoverWeightsEnabled(enabled: boolean) {
+    this.crossoverWeightsEnabled = enabled;
+  }
+  setCrossoverVarsEnabled(enabled: boolean) {
+    this.crossoverVarsEnabled = enabled;
   }
 
   async submitChoice(chosenIndex: number): Promise<void> {
@@ -192,14 +210,11 @@ export class GeneticEvolutionController implements IGeneticEvolutionController  
     newPop.push(...top1);
 
     while (newPop.length < this.populationSize) {
-      if (top1.length > 0 && top2.length > 0) {
-        const p1 = this.selectParent(top1);
-        const p2 = this.selectParent(top2);
-        const child = this.crossover(p1, p2);
-        newPop.push(this.mutate(child));
-      } else {
-        newPop.push(this.makeRandomCandidate());
-      }
+      const p1 = this.selectParent(top1);
+      const p2 = this.selectParent(top2);
+      const child = this.crossover(p1, p2);
+      newPop.push(this.mutate(child));
+
     }
 
     this.currentPopulation = newPop;
@@ -211,40 +226,52 @@ export class GeneticEvolutionController implements IGeneticEvolutionController  
     return tourney.reduce((best, c) => (c.score > best.score ? c : best), tourney[0]);
   }
 
-  private crossover(p1: ScoredCandidate, p2: ScoredCandidate): ScoredCandidate {
-    const weights = p1.weights.map((c, i) =>
-      c.map((k, j) =>
-        k.map((r, m) =>
-          r.map((_, n) =>
-            Math.random() < this.crossoverRatio
-              ? p1.weights[i][j][m][n]
-              : p2.weights[i][j][m][n]
+private crossover(p1: ScoredCandidate, p2: ScoredCandidate): ScoredCandidate {
+    let weights: number[][][][];
+    if (this.crossoverWeightsEnabled) {
+      weights = p1.weights.map((c, i) =>
+        c.map((k, j) =>
+          k.map((r, m) =>
+            r.map((_, n) =>
+              Math.random() < this.crossoverRatio
+                ? p1.weights[i][j][m][n]
+                : p2.weights[i][j][m][n]
+            )
           )
         )
-      )
-    );
+      );
+    } else {
+      weights = this.deepCopyWeights(p1.weights);
+    }
 
-    const activationVariables = p1.activationVariables.map((v, i) => ({
-      name: v.name,
-      value:
-        Math.random() < this.crossoverRatio
-          ? v.value
-          : p2.activationVariables[i].value,
-    }));
+    let activationVariables: VariableValue[];
+    if (this.crossoverVarsEnabled) {
+      activationVariables = p1.activationVariables.map((v, i) => ({
+        name: v.name,
+        value:
+          Math.random() < this.crossoverRatio
+            ? v.value
+            : p2.activationVariables[i].value,
+      }));
+    } else {
+      activationVariables = this.deepCopyVars(p1.activationVariables);
+    }
 
     return { weights, activationVariables, score: 0 };
   }
 
   private mutate(candidate: Omit<ScoredCandidate, "score">): ScoredCandidate {
-    return { weights: this.mutateWeights(candidate.weights), activationVariables: this.mutateVariables(candidate.activationVariables), score: 0 };
+    const weights = this.mutateWeightsEnabled ? this.mutateWeights(candidate.weights) : this.deepCopyWeights(candidate.weights);
+    const activationVariables = this.mutateVarsEnabled ? this.mutateVariables(candidate.activationVariables) : this.deepCopyVars(candidate.activationVariables);
+    return { weights, activationVariables, score: 0 };
   }
 
   private makeRandomCandidate(): ScoredCandidate {
-    return { weights: this.generateRandomWeights(), activationVariables: this.generateRandomVariables(), score: 0 };
+    return { weights: this.generateRandomWeights(), activationVariables: this.baseActivationVariables, score: 0 };
   }
 
   private makeEmptyCandidate(): ScoredCandidate {
-    return { weights: this.generateEmptyWeights(), activationVariables: this.generateEmptyVariables(), score: 0 };
+    return { weights: this.generateEmptyWeights(), activationVariables: this.baseActivationVariables, score: 0 };
   }
 
   private mutateWeights(weights: number[][][][]): number[][][][] {
@@ -284,13 +311,6 @@ export class GeneticEvolutionController implements IGeneticEvolutionController  
     );
   }
 
-  private generateRandomVariables(): VariableValue[] {
-    return ActivationVariableUtils.getVariables(this.activationCode).map(m => ({
-      name: m.name,
-      value: this.roundToSigFigs(m.min + Math.random() * (m.max - m.min), 2),
-    }));
-  }
-
   private generateEmptyWeights(): number[][][][] {
     return Array.from({ length: 3 }, () =>
       Array.from({ length: 3 }, () =>
@@ -301,10 +321,11 @@ export class GeneticEvolutionController implements IGeneticEvolutionController  
     );
   }
 
-  private generateEmptyVariables(): VariableValue[] {
-    return ActivationVariableUtils.getVariables(this.activationCode).map(m => ({
-      name: m.name,
-      value: 0,
-    }));
+  private deepCopyWeights(src: number[][][][]): number[][][][] {
+    return src.map(channel => channel.map(kernel => kernel.map(row => row.slice())));
+  }
+
+  private deepCopyVars(src: VariableValue[]): VariableValue[] {
+    return src.map(v => ({ name: v.name, value: v.value }));
   }
 }
