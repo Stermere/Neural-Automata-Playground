@@ -35,9 +35,10 @@ export default function WebGPUNeuralAutomata(): JSX.Element {
   const [zoom, setZoom] = useState(1);
   const [selectedTabIndex, setSelectedTabIndex] = useState(0);
   const viewMode = selectedTabIndex === 4 ? 'genetic' : 'single';
+  const [webgpuError, setWebgpuError] = useState<string | null>(null);
 
   useEffect(() => {
-    if (initialized.current) return;
+    if (initialized.current || webgpuError) return;
     initialized.current = true;
 
     const canvas = canvasRef.current;
@@ -61,7 +62,10 @@ export default function WebGPUNeuralAutomata(): JSX.Element {
       controller.setActivationParameters(preWarmConfig.normalize);
       controller.setActivationFunctionCode(ActivationVariableUtils.transformActivationCodeDefault(preWarmConfig.activationCode));
       controller.randomizeCanvas();
-    }).catch(console.error);
+    }).catch((err) => {
+      console.error(err);
+      setWebgpuError('Failed to initialize WebGPU: ' + (err?.message || String(err)));
+    });
 
 
     // Switches to a different pattern after pre warming the canvas content
@@ -76,23 +80,19 @@ export default function WebGPUNeuralAutomata(): JSX.Element {
     return () => {
       controllerRef.current?.destroy();
     };
-  }, []);
+  }, [webgpuError]);
 
   useEffect(() => {
-    // Get all config keys that should exist
     const configKeys = Object.keys(DefaultConfigController.configMap)
       .map(name => `${LOCAL_STORAGE_CONFIG_NAME}${name}`);
-
-    // Check if all keys exist in localStorage
+      
     const allExist = configKeys.every(key => localStorage.getItem(key) !== null);
 
     if (!allExist) {
-      // If any key is missing, set all configs
       for (const [name, config] of Object.entries(DefaultConfigController.configMap)) {
         localStorage.setItem(`${LOCAL_STORAGE_CONFIG_NAME}${name}`, JSON.stringify(config));
       }
 
-      // Reload page after initial setup
       window.location.reload();
     }
   }, []);
@@ -224,15 +224,27 @@ export default function WebGPUNeuralAutomata(): JSX.Element {
 
   return (
     <div className={styles.canvasContainer}>
-      <canvas
-        ref={canvasRef}
-        width={SIZE[0]}
-        height={SIZE[1]}
-        className={styles.canvas}
-        style={{ 
-          display: viewMode === 'single' ? 'block' : 'none',
-        }}
-      />
+      {webgpuError ? (
+        <div
+          className={styles.canvas}
+          style={{ width: SIZE[0], height: SIZE[1], display: viewMode === 'single' ? 'flex' : 'none', alignItems: 'center', justifyContent: 'center', background: '#111', color: '#fff', padding: '16px', boxSizing: 'border-box' }}
+        >
+          <div style={{ textAlign: 'center' }}>
+            <h3 style={{ margin: '0 0 8px' }}>WebGPU Unavailable have you enabled it?</h3>
+            <p style={{ margin: 0 }}>{webgpuError}</p>
+          </div>
+        </div>
+      ) : (
+        <canvas
+          ref={canvasRef}
+          width={SIZE[0]}
+          height={SIZE[1]}
+          className={styles.canvas}
+          style={{
+            display: viewMode === 'single' ? 'block' : 'none',
+          }}
+        />
+      )}
       
       {viewMode === 'genetic' && (
         <GeneticCanvasGrid

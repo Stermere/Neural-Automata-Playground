@@ -27,7 +27,11 @@ export class WebGPUNeuralAutomataController {
   private texB!: GPUTexture;
   private bindA!: GPUBindGroup;
   private bindB!: GPUBindGroup;
+  private renderBindA!: GPUBindGroup;
+  private renderBindB!: GPUBindGroup;
   private renderBind!: GPUBindGroup;
+  private renderBindATexture: GPUTexture | null = null;
+  private renderBindBTexture: GPUTexture | null = null;
 
   private computePipeline!: GPUComputePipeline;
   private renderPipeline!: GPURenderPipeline;
@@ -57,6 +61,10 @@ export class WebGPUNeuralAutomataController {
   private lastClickY: number = 0;
 
   private isDraggable = true;
+
+  private brushPixelBuffer: Uint8Array | null = null;
+  private brushBufferWidth = 0;
+  private brushBufferHeight = 0;
 
   constructor(private config: AutomataConfig) {
     this.brushRadius = config.brushRadius ?? 20;
@@ -93,7 +101,25 @@ export class WebGPUNeuralAutomataController {
     // Bind groups
     this.bindA = this.makeBindGroup(this.texA, this.texB);
     this.bindB = this.makeBindGroup(this.texB, this.texA);
-    this.updateRenderBind();
+
+    // Precreate render bind groups for both textures
+    this.renderBindA = this.device.createBindGroup({
+      layout: this.renderPipeline.getBindGroupLayout(0),
+      entries: [
+        { binding: 0, resource: this.texA.createView() },
+        { binding: 1, resource: this.sampler },
+      ],
+    });
+    this.renderBindB = this.device.createBindGroup({
+      layout: this.renderPipeline.getBindGroupLayout(0),
+      entries: [
+        { binding: 0, resource: this.texB.createView() },
+        { binding: 1, resource: this.sampler },
+      ],
+    });
+    this.renderBindATexture = this.texA;
+    this.renderBindBTexture = this.texB;
+    this.renderBind = this.renderBindB;
 
     // Mouse events
     this.setupMouse(canvas, this.gridSize);
@@ -318,26 +344,30 @@ export class WebGPUNeuralAutomataController {
   }
 
   private updateRenderBind(): void {
-    this.renderBind = this.device.createBindGroup({
-      layout: this.renderPipeline.getBindGroupLayout(0),
-      entries: [
-        { binding: 0, resource: this.texB.createView() },
-        { binding: 1, resource: this.sampler },
-      ],
-    });
+    if (this.renderBindATexture === this.texB) {
+      this.renderBind = this.renderBindA;
+      return;
+    }
+    if (this.renderBindBTexture === this.texB) {
+      this.renderBind = this.renderBindB;
+      return;
+    }
   }
 
   // Setup panning and drawing functionality
   private setupMouse(canvas: HTMLCanvasElement, gridSize: [number, number]) {
+    const isTouchEvent = (ev: any): ev is TouchEvent => !!ev && 'touches' in ev;
+    const isMouseEvent = (ev: any): ev is MouseEvent => !!ev && typeof ev.clientX === 'number' && typeof ev.clientY === 'number';
+
     const getEventCoords = (event: MouseEvent | TouchEvent): [number, number] => {
       let clientX: number, clientY: number;
-      if (event instanceof TouchEvent) {
-        const touch = event.touches[0] || event.changedTouches[0];
+      if (isTouchEvent(event)) {
+        const touch = (event as TouchEvent).touches?.[0] || (event as TouchEvent).changedTouches?.[0];
         clientX = touch.clientX;
         clientY = touch.clientY;
       } else {
-        clientX = event.clientX;
-        clientY = event.clientY;
+        clientX = (event as MouseEvent).clientX;
+        clientY = (event as MouseEvent).clientY;
       }
 
       const rect = canvas.getBoundingClientRect();
@@ -348,7 +378,7 @@ export class WebGPUNeuralAutomataController {
     };
 
     const handleStart = (e: MouseEvent | TouchEvent) => {
-      if (e instanceof MouseEvent && e.button === 2) {
+      if (isMouseEvent(e) && (e as MouseEvent).button === 2) {
         e.preventDefault();
         const currentTransform = canvas.style.transform;
         const translateMatch = currentTransform.match(/translate\(([^)]+)\)/);
@@ -356,11 +386,12 @@ export class WebGPUNeuralAutomataController {
         this.panOffset.x = parseFloat(translateValues[0]) || 0;
         this.panOffset.y = parseFloat(translateValues[1]) || 0;
         this.isDragging = true;
-        this.dragStart = { x: e.clientX - this.panOffset.x, y: e.clientY - this.panOffset.y };
+        this.dragStart = { x: (e as MouseEvent).clientX - this.panOffset.x, y: (e as MouseEvent).clientY - this.panOffset.y };
         canvas.style.cursor = 'grabbing';
         return;
       }
-      e.preventDefault?.();
+      // call preventDefault if available (TouchEvent may not be present in some browsers)
+      try { (e as any).preventDefault && (e as any).preventDefault(); } catch {}
       this.drawing = true;
       const [gx, gy] = getEventCoords(e);
 
@@ -370,21 +401,21 @@ export class WebGPUNeuralAutomataController {
     };
 
     const handleMove = (e: MouseEvent | TouchEvent) => {
-      if (e instanceof MouseEvent && this.isDragging && this.isDraggable) {
-        const newPanX = e.clientX - this.dragStart.x;
-        const newPanY = e.clientY - this.dragStart.y;
+      if (isMouseEvent(e) && this.isDragging && this.isDraggable) {
+        const newPanX = (e as MouseEvent).clientX - this.dragStart.x;
+        const newPanY = (e as MouseEvent).clientY - this.dragStart.y;
         this.panOffset = { x: newPanX, y: newPanY };
-        
+
         const currentTransform = canvas.style.transform;
         const scaleMatch = currentTransform.match(/scale\(([^)]+)\)/);
         const currentScale = scaleMatch ? scaleMatch[1] : '1';
-        
+
         canvas.style.transform = `translate(${newPanX}px, ${newPanY}px) scale(${currentScale})`;
         return
       }
 
       if (!this.drawing) return;
-      e.preventDefault?.();
+      try { (e as any).preventDefault && (e as any).preventDefault(); } catch {}
       const [gx, gy] = getEventCoords(e);
       
       this.lastClickX = gx;
@@ -450,14 +481,15 @@ export class WebGPUNeuralAutomataController {
       return;
     }
     
-    const pixels = new Uint8Array(width * height * 4);
-    
-    for (let i = 0; i < width * height; i++) {
-      pixels[i * 4 + 0] = 255;
-      pixels[i * 4 + 1] = 255;
-      pixels[i * 4 + 2] = 255;
-      pixels[i * 4 + 3] = 255;
+    // Reuse a preallocated pixel buffer when possible
+    const neededSize = width * height * 4;
+    if (!this.brushPixelBuffer || this.brushBufferWidth !== width || this.brushBufferHeight !== height) {
+      this.brushPixelBuffer = new Uint8Array(neededSize);
+      this.brushBufferWidth = width;
+      this.brushBufferHeight = height;
     }
+    const pixels = this.brushPixelBuffer;
+    pixels.fill(255);
     
     this.device.queue.writeTexture(
       { texture: this.texA, origin: [minX, minY, 0] },
@@ -481,6 +513,9 @@ export class WebGPUNeuralAutomataController {
       }
       this.lastFrameTime = currentTime;
 
+      // Single command encoder for both compute and render to reduce submit overhead
+      const encoder = this.device.createCommandEncoder();
+
       if (!this.paused) {
         const timestepData = new Float32Array([
           this.timestep,
@@ -491,24 +526,23 @@ export class WebGPUNeuralAutomataController {
         this.device.queue.writeBuffer(this.timestepBuffer, 0, timestepData);
         this.timestep += 1;
 
-        // Compute
-        const encC = this.device.createCommandEncoder();
-        const passC = encC.beginComputePass();
-        passC.setPipeline(this.computePipeline);
-        passC.setBindGroup(0, this.bindA);
-        passC.dispatchWorkgroups(w/16, h/16);
-        passC.end();
-        this.device.queue.submit([encC.finish()]);
+        // Compute pass
+        const computePass = encoder.beginComputePass();
+        computePass.setPipeline(this.computePipeline);
+        computePass.setBindGroup(0, this.bindA);
+        computePass.dispatchWorkgroups(Math.ceil(w / 16), Math.ceil(h / 16));
+        computePass.end();
       }
 
-      // Render
-      const encR = this.device.createCommandEncoder();
-      const passR = encR.beginRenderPass({ colorAttachments: [{ view: this.context.getCurrentTexture().createView(), loadOp:'clear', storeOp:'store' }] });
-      passR.setPipeline(this.renderPipeline);
-      passR.setBindGroup(0, this.renderBind);
-      passR.draw(4);
-      passR.end();
-      this.device.queue.submit([encR.finish()]);
+      // Render pass (always run to present the current texture)
+      const renderPass = encoder.beginRenderPass({ colorAttachments: [{ view: this.context.getCurrentTexture().createView(), loadOp:'clear', storeOp:'store' }] });
+      renderPass.setPipeline(this.renderPipeline);
+      renderPass.setBindGroup(0, this.renderBind);
+      renderPass.draw(4);
+      renderPass.end();
+
+      // Submit once
+      this.device.queue.submit([encoder.finish()]);
 
       // Ping-pong
       if (!this.paused) {
@@ -553,6 +587,8 @@ export class WebGPUNeuralAutomataController {
     // Clear other references
     this.bindA = undefined as any;
     this.bindB = undefined as any;
+    this.renderBindA = undefined as any;
+    this.renderBindB = undefined as any;
     this.renderBind = undefined as any;
     this.computePipeline = undefined as any;
     this.renderPipeline = undefined as any;
