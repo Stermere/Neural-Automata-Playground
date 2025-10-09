@@ -13,17 +13,15 @@ import NeuralAutomataIntroduction from './widgets/NeuralAutomataIntroduction.tsx
 import { DEFAULT_CONFIG, PREWARM_CONFIG } from "./constants/filenameConstants";
 import ActivationVariableEditor from './widgets/ActivationVariableEditor.tsx';
 import { ActivationVariableUtils, VariableValue } from './utils/ActivationVariableUtils.ts';
-import GeneticEditor from './widgets/GeneticEditor.tsx';
-import { GeneticCandidate, GeneticEvolutionController } from './controllers/GeneticEvolutionController.ts';
-import { GeneticCanvasGridRef, GeneticCanvasGrid} from './widgets/GeneticCanvasGrid';
+import WeightExplorer from './widgets/WeightExplorer.tsx';
+import { WeightExplorerController } from './controllers/WeightExplorerController.ts';
 
 const SIZE: [number, number] = [1024, 1024];
 
 export default function WebGPUNeuralAutomata(): JSX.Element {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const controllerRef = useRef<WebGPUNeuralAutomataController | null>(null);
-  const geneticEvolutionControllerRef = useRef<GeneticEvolutionController | null>(null);
-  const geneticGridRef = useRef<GeneticCanvasGridRef>(null);
+  const geneticEvolutionControllerRef = useRef<WeightExplorerController | null>(null)
   const initialized = useRef(false);
   const preWarmConfig = DefaultConfigController.getConfig(PREWARM_CONFIG)
   const initialConfig = DefaultConfigController.getConfig(DEFAULT_CONFIG)
@@ -34,7 +32,6 @@ export default function WebGPUNeuralAutomata(): JSX.Element {
   const [normalizeInputToActivation, setNormalize] = useState(preWarmConfig.normalize);
   const [zoom, setZoom] = useState(1);
   const [selectedTabIndex, setSelectedTabIndex] = useState(0);
-  const viewMode = selectedTabIndex === 4 ? 'genetic' : 'single';
   const [webgpuError, setWebgpuError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -53,9 +50,8 @@ export default function WebGPUNeuralAutomata(): JSX.Element {
     const controller = new WebGPUNeuralAutomataController(config);
     controllerRef.current = controller;
 
-    const geneticController = new GeneticEvolutionController({activationCode, weights, activationVariables})
+    const geneticController = new WeightExplorerController()
     geneticEvolutionControllerRef.current = geneticController;
-    geneticController.init().catch(console.error);
 
     controller.init().then(async () => {
       controller.updateWeights(preWarmConfig.weights.flat(3));
@@ -96,12 +92,6 @@ export default function WebGPUNeuralAutomata(): JSX.Element {
       window.location.reload();
     }
   }, []);
-
-  useEffect(() => {
-    if (controllerRef.current) {
-      controllerRef.current.togglePaused(viewMode === 'genetic');
-    }
-  }, [viewMode]);
 
   useEffect(() => {
     const handleResize = () => {
@@ -176,18 +166,9 @@ export default function WebGPUNeuralAutomata(): JSX.Element {
     handleActivationChange(updatedActivation, activationVariables);
   };
 
-  const handleMutationChange = (updatedWeights: number[][][][], activationVariables: VariableValue[]) => {
-    setWeights(updatedWeights);
-    setActivationVariables(activationVariables);
-    controllerRef.current?.updateWeights(updatedWeights.flat(3));
-    controllerRef.current?.setActivationFunctionCode(ActivationVariableUtils.transformActivationCode(activationCode, activationVariables));
-    controllerRef.current?.randomizeCanvas();
-  }
-
   const handleWeightChange = (updatedWeights: number[][][][]) => {
     setWeights(updatedWeights);
     controllerRef.current?.updateWeights(updatedWeights.flat(3));
-    geneticEvolutionControllerRef.current?.updateWeights(updatedWeights);
   };
 
   const handleActivationChange = (updatedActivation: { code: string; normalize: boolean, computeKernel?: boolean }, activationVariablesConfig?: VariableValue[]) => {
@@ -195,12 +176,6 @@ export default function WebGPUNeuralAutomata(): JSX.Element {
     setNormalize(updatedActivation.normalize);
     controllerRef.current?.setActivationParameters(updatedActivation.normalize, updatedActivation.computeKernel);
     controllerRef.current?.setActivationFunctionCode(ActivationVariableUtils.transformActivationCode(updatedActivation.code, activationVariablesConfig ?? activationVariables));
-
-    geneticEvolutionControllerRef.current?.setActivationVariables(activationVariablesConfig ?? activationVariables);
-    geneticEvolutionControllerRef.current?.setActivationFunctionCode(updatedActivation.code);
-    geneticEvolutionControllerRef.current?.init();
-    (geneticEvolutionControllerRef.current) ? 
-      geneticGridRef.current?.updateAllPanels(geneticEvolutionControllerRef.current?.presentNext(), updatedActivation.code, updatedActivation.normalize, updatedActivation.computeKernel) : null;
   }
 
   const handleApplyActivationVariableChange = (code: string) => {
@@ -208,8 +183,6 @@ export default function WebGPUNeuralAutomata(): JSX.Element {
   }
 
   const handleSetActivationVariables = (values: VariableValue[]) => {
-    geneticEvolutionControllerRef.current?.setActivationVariables(values);
-    geneticEvolutionControllerRef.current?.init();
     setActivationVariables(values);
   }
 
@@ -227,7 +200,7 @@ export default function WebGPUNeuralAutomata(): JSX.Element {
       {webgpuError ? (
         <div
           className={styles.canvas}
-          style={{ width: SIZE[0], height: SIZE[1], display: viewMode === 'single' ? 'flex' : 'none', alignItems: 'center', justifyContent: 'center', background: '#111', color: '#fff', padding: '16px', boxSizing: 'border-box' }}
+          style={{ width: SIZE[0], height: SIZE[1], display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#111', color: '#fff', padding: '16px', boxSizing: 'border-box' }}
         >
           <div style={{ textAlign: 'center' }}>
             <h3 style={{ margin: '0 0 8px' }}>WebGPU Unavailable have you enabled it?</h3>
@@ -240,18 +213,6 @@ export default function WebGPUNeuralAutomata(): JSX.Element {
           width={SIZE[0]}
           height={SIZE[1]}
           className={styles.canvas}
-          style={{
-            display: viewMode === 'single' ? 'block' : 'none',
-          }}
-        />
-      )}
-      
-      {viewMode === 'genetic' && (
-        <GeneticCanvasGrid
-          ref={geneticGridRef}
-          activationCode={activationCode}
-          normalize={normalizeInputToActivation}
-          geneticEvolutionControllerRef={geneticEvolutionControllerRef}
         />
       )}
       <div className={styles.controlContainer}>
@@ -272,7 +233,7 @@ export default function WebGPUNeuralAutomata(): JSX.Element {
           onLoad={handleConfigLoad} 
         />
 
-        <ContentSwitcher labels={['Explanation', 'Weight Editor', 'Activation Editor', 'Variable Editor', 'Evolution Editor', 'None']} setSelectedIndex={setSelectedTabIndex}>
+        <ContentSwitcher labels={['Explanation', 'Weight Editor', 'Activation Editor', 'Variable Editor', 'Weight Explorer', 'None']} setSelectedIndex={setSelectedTabIndex}>
           <NeuralAutomataIntroduction />
           <WeightEditor
             weights={weights}
@@ -290,10 +251,9 @@ export default function WebGPUNeuralAutomata(): JSX.Element {
             setValues={handleSetActivationVariables}
             onVariableChange={handleApplyActivationVariableChange}
           />
-          <GeneticEditor
+          <WeightExplorer
             controller={geneticEvolutionControllerRef.current}
-            showMutation={handleMutationChange}
-            showMutations={(candidates: GeneticCandidate[]) => geneticGridRef.current?.updateAllPanels(candidates)}
+            updateWeights={handleWeightChange}
           />
         </ContentSwitcher>
       </div>
