@@ -14,18 +14,17 @@ import { DEFAULT_CONFIG, PREWARM_CONFIG } from "./constants/filenameConstants";
 import ActivationVariableEditor from './widgets/ActivationVariableEditor.tsx';
 import { ActivationVariableUtils, VariableValue } from './utils/ActivationVariableUtils.ts';
 import WeightExplorer from './widgets/WeightExplorer.tsx';
-import { WeightExplorerController } from './controllers/WeightExplorerController.ts';
+import { WeightExplorerController, Weights3D } from './controllers/WeightExplorerController.ts';
 
 const SIZE: [number, number] = [1024, 1024];
 
 export default function WebGPUNeuralAutomata(): JSX.Element {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const controllerRef = useRef<WebGPUNeuralAutomataController | null>(null);
-  const geneticEvolutionControllerRef = useRef<WeightExplorerController | null>(null)
+  const weightExplorerRef = useRef<WeightExplorerController | null>(null)
   const initialized = useRef(false);
   const preWarmConfig = DefaultConfigController.getConfig(PREWARM_CONFIG)
   const initialConfig = DefaultConfigController.getConfig(DEFAULT_CONFIG)
-  
   const [weights, setWeights] = useState(preWarmConfig.weights);
   const [activationCode, setActivationCode] = useState(preWarmConfig.activationCode);
   const [activationVariables, setActivationVariables] = useState(ActivationVariableUtils.getDefaultVariableValues(ActivationVariableUtils.getVariables(preWarmConfig.activationCode)));
@@ -50,19 +49,18 @@ export default function WebGPUNeuralAutomata(): JSX.Element {
     const controller = new WebGPUNeuralAutomataController(config);
     controllerRef.current = controller;
 
-    const geneticController = new WeightExplorerController()
-    geneticEvolutionControllerRef.current = geneticController;
+    const weightExplorer = new WeightExplorerController()
+    weightExplorerRef.current = weightExplorer;
 
     controller.init().then(async () => {
-      controller.updateWeights(preWarmConfig.weights.flat(3));
-      controller.setActivationParameters(preWarmConfig.normalize);
-      controller.setActivationFunctionCode(ActivationVariableUtils.transformActivationCodeDefault(preWarmConfig.activationCode));
-      controller.randomizeCanvas();
+      handleWeightChange(preWarmConfig.weights)
+      controllerRef.current?.setActivationParameters(preWarmConfig.normalize);
+      controllerRef.current?.setActivationFunctionCode(ActivationVariableUtils.transformActivationCodeDefault(preWarmConfig.activationCode));
+      controllerRef.current?.randomizeCanvas();
     }).catch((err) => {
       console.error(err);
       setWebgpuError('Failed to initialize WebGPU: ' + (err?.message || String(err)));
     });
-
 
     // Switches to a different pattern after pre warming the canvas content
     setTimeout(() => {
@@ -72,10 +70,6 @@ export default function WebGPUNeuralAutomata(): JSX.Element {
         computeKernel: initialConfig.computeKernel,
       })
     }, 500);
-
-    return () => {
-      controllerRef.current?.destroy();
-    };
   }, [webgpuError]);
 
   useEffect(() => {
@@ -169,6 +163,7 @@ export default function WebGPUNeuralAutomata(): JSX.Element {
   const handleWeightChange = (updatedWeights: number[][][][]) => {
     setWeights(updatedWeights);
     controllerRef.current?.updateWeights(updatedWeights.flat(3));
+    weightExplorerRef.current?.updateWeights(updatedWeights);
   };
 
   const handleActivationChange = (updatedActivation: { code: string; normalize: boolean, computeKernel?: boolean }, activationVariablesConfig?: VariableValue[]) => {
@@ -252,8 +247,8 @@ export default function WebGPUNeuralAutomata(): JSX.Element {
             onVariableChange={handleApplyActivationVariableChange}
           />
           <WeightExplorer
-            controller={geneticEvolutionControllerRef.current}
-            updateWeights={handleWeightChange}
+            controller={weightExplorerRef.current}
+            updateWeights={(modifiedWeights: Weights3D) => controllerRef.current?.updateWeights(modifiedWeights.flat(3))}
           />
         </ContentSwitcher>
       </div>
