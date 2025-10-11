@@ -201,4 +201,87 @@ fn activation(x: f32) -> f32 {
   return (e1 - e2) / (e1 + e2);
 }`,
 
+  "Neural Network": `// --- Tunable weights / biases ---
+// Inputs: in0 = x (convolution sum), in1..in8 = neighbors in this order:
+// (-1,-1), (0,-1), (1,-1), (1,0), (1,1), (0,1), (-1,1), (-1,0)
+
+// Hidden neuron 0 (9 weights + bias)
+const WH0_0: f32 = 1.63; @variable -2.0 2.0
+const WH0_1: f32 = -1.38; @variable -2.0 2.0
+const WH0_2: f32 = -1.44; @variable -2.0 2.0
+const WH0_3: f32 = -1.92; @variable -2.0 2.0
+const WH0_4: f32 = -1.02; @variable -2.0 2.0
+const WH0_5: f32 = -1.87; @variable -2.0 2.0
+const WH0_6: f32 = -2; @variable -2.0 2.0
+const WH0_7: f32 = -1.35; @variable -2.0 2.0
+const WH0_8: f32 = -1.68; @variable -2.0 2.0
+const BH0: f32 = 1.67; @variable -2.0 2.0
+
+// Hidden neuron 1 (9 weights + bias)
+const WH1_0: f32 = 1.92; @variable -2.0 2.0
+const WH1_1: f32 = -0.55; @variable -2.0 2.0
+const WH1_2: f32 = -2; @variable -2.0 2.0
+const WH1_3: f32 = 1.65; @variable -2.0 2.0
+const WH1_4: f32 = 1.8; @variable -2.0 2.0
+const WH1_5: f32 = -1.14; @variable -2.0 2.0
+const WH1_6: f32 = 0; @variable -2.0 2.0
+const WH1_7: f32 = 1.44; @variable -2.0 2.0
+const WH1_8: f32 = 1.87; @variable -2.0 2.0
+const BH1: f32 = -0.84; @variable -2.0 2.0
+
+// Output layer (2 hidden -> 1 out) + bias
+const WOUT_0: f32 = 1; @variable -4.0 4.0
+const WOUT_1: f32 = 2.78; @variable -4.0 4.0
+const BOUT: f32 = 1.49; @variable -4.0 4.0
+
+// Optional output scaling / clipping
+const OUT_SCALE: f32 = -2.12; @variable -8.0 8.0
+const OUT_CLIP: f32 = 2.72; @variable 0.0 20.0
+
+// --- helpers ---
+fn sampleChannelAt(dx: i32, dy: i32) -> f32 {
+    let gx = i32(activationContext.gid.x) + dx;
+    let gy = i32(activationContext.gid.y) + dy;
+    let coord = wrapCoord(gx, gy); // vec2<i32>
+    let texel = textureLoad(src, coord, 0).rgb; // vec3<f32>
+    if (activationContext.channel == 0u) {
+        return texel.r;
+    } else if (activationContext.channel == 1u) {
+        return texel.g;
+    } else {
+        return texel.b;
+    }
+}
+
+// --- main activation: 9 inputs -> 2 hidden -> 1 out ---
+fn activation(x: f32) -> f32 {
+    // gather neighbors
+    let in0: f32 = x;
+    let in1: f32 = sampleChannelAt(-1, -1);
+    let in2: f32 = sampleChannelAt( 0, -1);
+    let in3: f32 = sampleChannelAt( 1, -1);
+    let in4: f32 = sampleChannelAt( 1,  0);
+    let in5: f32 = sampleChannelAt( 1,  1);
+    let in6: f32 = sampleChannelAt( 0,  1);
+    let in7: f32 = sampleChannelAt(-1,  1);
+    let in8: f32 = sampleChannelAt(-1,  0);
+
+    // Hidden neuron 0
+    var h0: f32 = in0*WH0_0 + in1*WH0_1 + in2*WH0_2 + in3*WH0_3 + in4*WH0_4
+                + in5*WH0_5 + in6*WH0_6 + in7*WH0_7 + in8*WH0_8 + BH0;
+    h0 = tanh(h0);
+
+    // Hidden neuron 1
+    var h1: f32 = in0*WH1_0 + in1*WH1_1 + in2*WH1_2 + in3*WH1_3 + in4*WH1_4
+                + in5*WH1_5 + in6*WH1_6 + in7*WH1_7 + in8*WH1_8 + BH1;
+    h1 = tanh(h1);
+
+    // Output
+    var out: f32 = h0 * WOUT_0 + h1 * WOUT_1 + BOUT;
+    out = out * OUT_SCALE;
+    out = clamp(out, -OUT_CLIP, OUT_CLIP);
+
+    return select(exp(out) - 1.0, out, out >= 0.0);
+}`
+
 };
