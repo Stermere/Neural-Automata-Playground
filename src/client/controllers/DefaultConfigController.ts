@@ -1,4 +1,4 @@
-import { DEFAULT_CONFIG, PREWARM_CONFIG } from "../constants/filenameConstants";
+import { DEFAULT_CONFIG } from "../constants/filenameConstants";
 
 export type ConfigData = {
   weights: number[][][][];

@@ -10,25 +10,29 @@ import { DefaultConfigController } from './controllers/DefaultConfigController.t
 import { LOCAL_STORAGE_CONFIG_NAME } from './constants/filenameConstants.ts';
 import { BASE_ACTIVATIONS } from './constants/baseActivations.ts';
 import NeuralAutomataIntroduction from './widgets/NeuralAutomataIntroduction.tsx';
-import { DEFAULT_CONFIG, PREWARM_CONFIG } from "./constants/filenameConstants";
+import { DEFAULT_CONFIG } from "./constants/filenameConstants";
 import ActivationVariableEditor from './widgets/ActivationVariableEditor.tsx';
 import { ActivationVariableUtils, VariableValue } from './utils/ActivationVariableUtils.ts';
 import WeightExplorer from './widgets/WeightExplorer.tsx';
 import { WeightExplorerController, Weights3D } from './controllers/WeightExplorerController.ts';
 
-const SIZE: [number, number] = [1024, 1024];
+
+const params = new URLSearchParams(window.location.search);
+const width = parseInt(params.get("width") ?? "") || 1024;
+const height = parseInt(params.get("height") ?? "") || 1024;
+
+const SIZE: [number, number] = [width, height];
 
 export default function WebGPUNeuralAutomata(): JSX.Element {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const controllerRef = useRef<WebGPUNeuralAutomataController | null>(null);
   const weightExplorerRef = useRef<WeightExplorerController | null>(null)
   const initialized = useRef(false);
-  const preWarmConfig = DefaultConfigController.getConfig(PREWARM_CONFIG)
   const initialConfig = DefaultConfigController.getConfig(DEFAULT_CONFIG)
-  const [weights, setWeights] = useState(preWarmConfig.weights);
-  const [activationCode, setActivationCode] = useState(preWarmConfig.activationCode);
-  const [activationVariables, setActivationVariables] = useState(ActivationVariableUtils.getDefaultVariableValues(ActivationVariableUtils.getVariables(preWarmConfig.activationCode)));
-  const [normalizeInputToActivation, setNormalize] = useState(preWarmConfig.normalize);
+  const [weights, setWeights] = useState(initialConfig.weights);
+  const [activationCode, setActivationCode] = useState(initialConfig.activationCode);
+  const [activationVariables, setActivationVariables] = useState(ActivationVariableUtils.getDefaultVariableValues(ActivationVariableUtils.getVariables(initialConfig.activationCode)));
+  const [normalizeInputToActivation, setNormalize] = useState(initialConfig.normalize);
   const [zoom, setZoom] = useState(1);
   const [selectedTabIndex, setSelectedTabIndex] = useState(0);
   const [webgpuError, setWebgpuError] = useState<string | null>(null);
@@ -46,30 +50,24 @@ export default function WebGPUNeuralAutomata(): JSX.Element {
       brushRadius: 20,
     };
 
+    
     const controller = new WebGPUNeuralAutomataController(config);
     controllerRef.current = controller;
-
+    
     const weightExplorer = new WeightExplorerController()
     weightExplorerRef.current = weightExplorer;
-
+    weightExplorer.initRandom();
+    weightExplorer.updateWeights(initialConfig.weights);
+    
     controller.init().then(async () => {
-      handleWeightChange(preWarmConfig.weights)
-      controllerRef.current?.setActivationParameters(preWarmConfig.normalize);
-      controllerRef.current?.setActivationFunctionCode(ActivationVariableUtils.transformActivationCodeDefault(preWarmConfig.activationCode));
+      handleWeightChange(initialConfig.weights)
+      controllerRef.current?.setActivationParameters(initialConfig.normalize);
+      controllerRef.current?.setActivationFunctionCode(ActivationVariableUtils.transformActivationCodeDefault(initialConfig.activationCode));
       controllerRef.current?.randomizeCanvas();
     }).catch((err) => {
       console.error(err);
       setWebgpuError('Failed to initialize WebGPU: ' + (err?.message || String(err)));
     });
-
-    // Switches to a different pattern after pre warming the canvas content
-    setTimeout(() => {
-      handleConfigLoad(initialConfig.weights, {
-        code: initialConfig.activationCode,
-        normalize: initialConfig.normalize,
-        computeKernel: initialConfig.computeKernel,
-      })
-    }, 500);
   }, [webgpuError]);
 
   useEffect(() => {
@@ -208,6 +206,7 @@ export default function WebGPUNeuralAutomata(): JSX.Element {
           width={SIZE[0]}
           height={SIZE[1]}
           className={styles.canvas}
+          style={{ width: SIZE[0], height: SIZE[1] }}
         />
       )}
       <div className={styles.controlContainer}>
