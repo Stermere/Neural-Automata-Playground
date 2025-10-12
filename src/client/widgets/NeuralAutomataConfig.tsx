@@ -70,7 +70,10 @@ export default function NeuralAutomataConfig({ weights, activationCode, normaliz
   };
 
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
+    const files = e.target.files;
+    if (!files || files.length === 0) return;
+    const file = files[files.length - 1];
+    
     if (!file) return;
     const reader = new FileReader();
     reader.onload = () => {
@@ -83,6 +86,7 @@ export default function NeuralAutomataConfig({ weights, activationCode, normaliz
       }
     };
     reader.readAsText(file);
+    e.target.value = '';
   };
 
   const handleExport = () => {
