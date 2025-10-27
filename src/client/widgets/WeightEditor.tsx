@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { KernelUtils } from '../utils/KernelUtils';
 import styles from './styles/weightEditor.module.css';
 
 type Weights3D = number[][][][];
@@ -56,11 +57,19 @@ export default function WeightEditor({ weights, onWeightUpdate }: WeightEditorPr
     onWeightUpdate(newWeights);
   };
 
-  const handleNoise = (outIdx: number, inIdx: number) => {
+  const handleFullRandomize = () => {
     const newWeights = structuredClone(weights);
-    newWeights[outIdx][inIdx] = newWeights[outIdx][inIdx].map(r =>
-      r.map(v => v + (Math.random() * 0.2 - 0.1))
-    );
+    for (let i = 0; i < weights.length; i++) {
+      for (let j = 0; j < weights.length; j++) {
+          newWeights[i][j] = KernelUtils.getPartialKernelVariation();
+      }
+    }
+    onWeightUpdate(newWeights);
+  }
+
+  const handlePartialRandomize = (outIdx: number, inIdx: number) => {
+    const newWeights = structuredClone(weights);
+    newWeights[outIdx][inIdx] = KernelUtils.getPartialKernelVariation();
     onWeightUpdate(newWeights);
   };
 
@@ -101,9 +110,9 @@ export default function WeightEditor({ weights, onWeightUpdate }: WeightEditorPr
                         </button>
                         <button
                           className={styles.btn}
-                          onClick={() => handleNoise(outIdx, inIdx)}
+                          onClick={() => handlePartialRandomize(outIdx, inIdx)}
                         >
-                          Noise
+                          Rand
                         </button>
                         <button
                           className={styles.btn}
@@ -189,6 +198,12 @@ export default function WeightEditor({ weights, onWeightUpdate }: WeightEditorPr
               <option key={opt.key} value={opt.key}>{opt.label}</option>
             ))}
           </select>
+          <button
+            className={styles.btn}
+            onClick={() => handleFullRandomize()}
+          >
+            Randomize All
+          </button>
         </div>
       </div>
     </div>
