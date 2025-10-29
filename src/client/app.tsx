@@ -36,6 +36,7 @@ export default function WebGPUNeuralAutomata(): JSX.Element {
   const [zoom, setZoom] = useState(1);
   const [selectedTabIndex, setSelectedTabIndex] = useState(0);
   const [webgpuError, setWebgpuError] = useState<string | null>(null);
+  const [controlsVisible, setControlsVisible] = useState(true);
 
   useEffect(() => {
     if (initialized.current || webgpuError) return;
@@ -151,6 +152,18 @@ export default function WebGPUNeuralAutomata(): JSX.Element {
     };
   }, [zoom]);
 
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'F4') {
+        e.preventDefault();
+        setControlsVisible(!controlsVisible);
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [controlsVisible]);
+
   const handleConfigLoad = (updatedWeights: number[][][][], updatedActivation: { code: string; normalize: boolean, computeKernel: boolean }) => {
     const activationVariables = ActivationVariableUtils.getDefaultVariableValues(ActivationVariableUtils.getVariables(updatedActivation.code))
     setActivationVariables(activationVariables);
@@ -209,7 +222,7 @@ export default function WebGPUNeuralAutomata(): JSX.Element {
           style={{ width: SIZE[0], height: SIZE[1] }}
         />
       )}
-      <div className={styles.controlContainer}>
+      <div className={styles.controlContainer} style={{ display: controlsVisible ? 'block' : 'none' }}>
         <CanvasControl
           onClear={() => controllerRef.current?.clearCanvas()}
           onRandomize={() => controllerRef.current?.randomizeCanvas()}
