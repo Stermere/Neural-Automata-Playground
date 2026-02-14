@@ -5,9 +5,10 @@ import { WeightExplorerController } from '../controllers/WeightExplorerControlle
 interface WeightExplorerProps {
   controller: WeightExplorerController | null;
   updateWeights: (updatedWeights: number[][][][]) => void;
+  setWeights: (updatedWeights: number[][][][]) => void
 }
 
-export default function WeightExplorer({ controller, updateWeights }: WeightExplorerProps) {
+export default function WeightExplorer({ controller, updateWeights, setWeights }: WeightExplorerProps) {
   const [running, setRunning] = useState(false);
   const [amplitudeMax, setAmplitudeMax] = useState(1);
   const [freqMin, setFreqMin] = useState(0.0);
@@ -96,7 +97,19 @@ export default function WeightExplorer({ controller, updateWeights }: WeightExpl
     setRunning(true);
   };
 
-  const handleStop = () => setRunning(false);
+  const handleStop = () => {
+    setRunning(false);
+    const weights = controller?.weightsAtTime(timeAccumRef.current)
+    if (weights) setWeights(weights)
+  }
+
+  useEffect(() => {
+    return () => {
+      setRunning(false);
+      const weights = controller?.weightsAtTime(timeAccumRef.current);
+      if (weights) setWeights(weights);
+    };
+  }, [controller, setWeights]);
 
   const toggleDirection = () => setDirection((d) => (d === 1 ? -1 : 1));
 

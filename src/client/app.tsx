@@ -261,6 +261,7 @@ export default function WebGPUNeuralAutomata(): JSX.Element {
           <WeightExplorer
             controller={weightExplorerRef.current}
             updateWeights={(modifiedWeights: Weights3D) => controllerRef.current?.updateWeights(modifiedWeights.flat(3))}
+            setWeights={setWeights}
           />
         </ContentSwitcher>
       </div>

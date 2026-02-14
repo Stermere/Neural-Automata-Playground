@@ -29,6 +29,8 @@ export class WeightExplorerController {
     continuityDrift: 0.1,
     continuityCenterPull: 0.01,
   };
+
+  init = false;
   
   public updateWeights(weights: Weights3D) {
     this.weights = weights;
@@ -66,6 +68,7 @@ export class WeightExplorerController {
     }
 
     this.lastTime = 0;
+    this.init = true;
   }
 
   setConfig(config: Partial<WaveConfig>): void {
