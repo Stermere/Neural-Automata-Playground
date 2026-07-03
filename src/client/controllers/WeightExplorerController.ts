@@ -1,4 +1,5 @@
 import { cloneDeep } from 'lodash';
+import { VISIBLE_CHANNELS, KERNEL_SIZE } from '../constants/channelConstants';
 
 export type Weights3D = number[][][][]; // [out][in][row][col]
 
@@ -44,9 +45,17 @@ export class WeightExplorerController {
     );
   }
 
-  initRandom(config?: Partial<WaveConfig>, dims = { out: 3, input: 3, size: 5 }): void {
+  // Dimensions follow the shape of the current weights (channel count varies)
+  private currentDims(): { out: number; input: number; size: number } {
+    const out = this.weights?.length ?? VISIBLE_CHANNELS;
+    const input = this.weights?.[0]?.length ?? out;
+    const size = this.weights?.[0]?.[0]?.length ?? KERNEL_SIZE;
+    return { out, input, size };
+  }
+
+  initRandom(config?: Partial<WaveConfig>, dims?: { out: number; input: number; size: number }): void {
     this.config = { ...this.config, ...(config ?? {}) };
-    const { out, input, size } = dims;
+    const { out, input, size } = dims ?? this.currentDims();
 
     this.amplitudes = this.mkZero(out, input, size);
     this.freqs = this.mkZero(out, input, size);
@@ -87,11 +96,18 @@ export class WeightExplorerController {
     return Math.max(min, Math.min(max, x));
   }
 
-  weightsAtTime(tSeconds: number, dims = { out: 3, input: 3, size: 5 }): Weights3D {
+  weightsAtTime(tSeconds: number): Weights3D {
     if (!this.weights || !this.currentPhases || !this.continuity)
       throw new Error("Controller not initialized");
 
-    const { out, input, size } = dims;
+    const { out, input, size } = this.currentDims();
+
+    // Re-roll the wave arrays if the weight shape changed since init
+    if (this.amplitudes!.length !== out || this.amplitudes![0].length !== input) {
+      this.initRandom();
+      this.lastTime = tSeconds; // avoid a discontinuity jump
+    }
+
     const w: Weights3D = cloneDeep(this.weights);
 
     const dt = (tSeconds - this.lastTime) * this.config.globalSpeed;

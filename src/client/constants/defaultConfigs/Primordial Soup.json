@@ -1,0 +1,76 @@
+{
+  "weights": [
+    [
+      [
+        [0, 0, 0, 0, 0],
+        [0, 0.05, 0.2, 0.05, 0],
+        [0, 0.2, -1, 0.2, 0],
+        [0, 0.05, 0.2, 0.05, 0],
+        [0, 0, 0, 0, 0]
+      ],
+      [
+        [0, 0, 0, 0, 0],
+        [0, 0, 0, 0, 0],
+        [0, 0, 0, 0, 0],
+        [0, 0, 0, 0, 0],
+        [0, 0, 0, 0, 0]
+      ],
+      [
+        [0, 0, 0, 0, 0],
+        [0, 0, 0, 0, 0],
+        [0, 0, 0, 0, 0],
+        [0, 0, 0, 0, 0],
+        [0, 0, 0, 0, 0]
+      ]
+    ],
+    [
+      [
+        [0, 0, 0, 0, 0],
+        [0, 0, 0, 0, 0],
+        [0, 0, 0, 0, 0],
+        [0, 0, 0, 0, 0],
+        [0, 0, 0, 0, 0]
+      ],
+      [
+        [0, 0, 0, 0, 0],
+        [0, 0.05, 0.2, 0.05, 0],
+        [0, 0.2, -1, 0.2, 0],
+        [0, 0.05, 0.2, 0.05, 0],
+        [0, 0, 0, 0, 0]
+      ],
+      [
+        [0, 0, 0, 0, 0],
+        [0, 0, 0, 0, 0],
+        [0, 0, 0, 0, 0],
+        [0, 0, 0, 0, 0],
+        [0, 0, 0, 0, 0]
+      ]
+    ],
+    [
+      [
+        [0, 0, 0, 0, 0],
+        [0, 0, 0, 0, 0],
+        [0, 0, 0, 0, 0],
+        [0, 0, 0, 0, 0],
+        [0, 0, 0, 0, 0]
+      ],
+      [
+        [0.00390625, 0.015625, 0.0234375, 0.015625, 0.00390625],
+        [0.015625, 0.0625, 0.09375, 0.0625, 0.015625],
+        [0.0234375, 0.09375, 0.140625, 0.09375, 0.0234375],
+        [0.015625, 0.0625, 0.09375, 0.0625, 0.015625],
+        [0.00390625, 0.015625, 0.0234375, 0.015625, 0.00390625]
+      ],
+      [
+        [0, 0, 0, 0, 0],
+        [0, 0, 0, 0, 0],
+        [0, 0, 0, 0, 0],
+        [0, 0, 0, 0, 0],
+        [0, 0, 0, 0, 0]
+      ]
+    ]
+  ],
+  "activationCode": "// ============================================================\n//  PRIMORDIAL SOUP\n//  Gray-Scott reaction-diffusion with a self-avoiding\n//  pheromone memory field.\n//\n//  R = chemical U (food)      kernel delivers laplacian(U)\n//  G = chemical V (organism)  kernel delivers laplacian(V)\n//  B = glow trail             kernel delivers gaussian-blur(V)\n//\n//  The twist: organisms die faster inside their own old\n//  glowing trail (TRAIL_AVOID), so colonies migrate, carve\n//  labyrinths, and refuse to backfill explored space.\n//  Set TRAIL_AVOID to 0 for classic Gray-Scott.\n//\n//  Regimes to dial in with FEED / KILL:\n//    0.0367 / 0.062  ->  dividing cells (default)\n//    0.030  / 0.062  ->  solitons\n//    0.055  / 0.062  ->  coral growth\n//    0.026  / 0.058  ->  pulsing chaos\n//\n//  How to seed life: wait until the screen turns red (the\n//  food field filling in), then paint a few small blobs.\n//  Life needs structure -- a fully random canvas collapses!\n// ============================================================\n\nconst FEED: f32 = 0.0367; @variable 0.0 0.1\nconst KILL: f32 = 0.062; @variable 0.03 0.075\nconst DIFFUSE_U: f32 = 1.0; @variable 0.2 1.4\nconst DIFFUSE_V: f32 = 0.5; @variable 0.1 0.7\nconst SPEED: f32 = 1.0; @variable 0.2 1.8\nconst TRAIL_AVOID: f32 = 0.004; @variable 0.0 0.02\nconst GLOW_GAIN: f32 = 1.6; @variable 0.0 4.0\nconst GLOW_FADE: f32 = 0.985; @variable 0.8 0.999\n\n// Stochastic-rounding dither: the canvas only stores 8 bits per\n// channel, which would freeze the tiny chemical gradients this\n// system lives on. A +-0.5/255 dither makes sub-quantum updates\n// survive on average, keeping the chemistry alive.\nfn hash01(p: vec3<f32>) -> f32 {\n  return fract(sin(dot(p, vec3<f32>(127.1, 311.7, 74.7))) * 43758.5453123);\n}\n\nfn activation(x: f32) -> f32 {\n  let u = activationContext.cellState.r;\n  let v = activationContext.cellState.g;\n  let trail = activationContext.cellState.b;\n  let reaction = u * v * v;\n\n  var result: f32;\n  if (activationContext.channel == 0u) {\n    // U: diffuses (x = laplacian of U), eaten by V, refilled by FEED\n    result = u + (DIFFUSE_U * x - reaction + FEED * (1.0 - u)) * SPEED;\n  } else if (activationContext.channel == 1u) {\n    // V: diffuses (x = laplacian of V), grows by eating U, dies at\n    // KILL rate -- faster inside its own glowing trail\n    let kill = KILL + TRAIL_AVOID * trail;\n    result = v + (DIFFUSE_V * x + reaction - (FEED + kill) * v) * SPEED;\n  } else {\n    // Trail: x = gaussian-blurred V. Remembers where life has been.\n    result = max(trail * GLOW_FADE - 0.002, x * GLOW_GAIN);\n  }\n\n  let dither = hash01(vec3<f32>(\n    f32(activationContext.gid.x),\n    f32(activationContext.gid.y),\n    activationContext.timestep + f32(activationContext.channel) * 17.0\n  )) - 0.5;\n\n  return result + dither / 255.0;\n}",
+  "normalize": false,
+  "computeKernel": true
+}

@@ -2,6 +2,7 @@ import React, { useState, useRef, useEffect } from 'react';
 import styles from './styles/neuralAutomataConfig.module.css';
 import { DEFAULT_EXPORT_NAME, LOCAL_STORAGE_CONFIG_NAME } from '../constants/filenameConstants';
 import { ActivationVariableUtils, VariableValue } from '../utils/ActivationVariableUtils';
+import { ShareUtils } from '../utils/ShareUtils';
 
 interface NeuralAutomataConfig {
   weights: number[][][][];
@@ -89,6 +90,29 @@ export default function NeuralAutomataConfig({ weights, activationCode, normaliz
     e.target.value = '';
   };
 
+  const [shareLabel, setShareLabel] = useState('Share');
+
+  const handleShare = async () => {
+    const activationCodeUpdated = ActivationVariableUtils.updateDefaults(activationCode, activationVariables);
+
+    try {
+      const url = await ShareUtils.buildShareUrl({
+        weights,
+        activationCode: activationCodeUpdated,
+        normalize,
+        computeKernel: String(computeKernel) !== 'false',
+      });
+      window.history.replaceState(null, '', url);
+      await navigator.clipboard.writeText(url);
+      setShareLabel('Copied!');
+    } catch (err) {
+      console.error('Failed to build share link:', err);
+      setShareLabel('Failed');
+    }
+
+    setTimeout(() => setShareLabel('Share'), 2000);
+  };
+
   const handleExport = () => {
     const activationCodeUpdated = ActivationVariableUtils.updateDefaults(activationCode, activationVariables);
     const blob = new Blob(
@@ -130,6 +154,7 @@ export default function NeuralAutomataConfig({ weights, activationCode, normaliz
         <button className={styles.btn} onClick={handleDelete}>Delete</button>
         <button className={styles.btn} onClick={() => fileInputRef.current?.click()}>Import</button>
         <button className={styles.btn} onClick={handleExport}>Export</button>
+        <button className={styles.btn} onClick={handleShare}>{shareLabel}</button>
       </div>
     </div>
   );

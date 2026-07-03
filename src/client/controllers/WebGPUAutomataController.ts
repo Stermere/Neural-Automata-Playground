@@ -1,6 +1,7 @@
 import computeShaderCode from '../../shaders/compute.wgsl?raw';
 import renderShaderCode from '../../shaders/render.wgsl?raw';
 import { BASE_ACTIVATIONS } from '../constants/baseActivations';
+import { VISIBLE_CHANNELS, MAX_TOTAL_CHANNELS, KERNEL_SIZE, clampChannelCount } from '../constants/channelConstants';
 
 const NORMALIZE_TRUE = 'let norm = x / max(weightSum, 1e-5);';
 const NORMALIZE_FALSE = 'let norm = x;'
@@ -25,6 +26,9 @@ export class WebGPUNeuralAutomataController {
   private weightBuffer!: GPUBuffer;
   private texA!: GPUTexture;
   private texB!: GPUTexture;
+  private hiddenA!: GPUBuffer;
+  private hiddenB!: GPUBuffer;
+  private computeBindGroupLayout!: GPUBindGroupLayout;
   private bindA!: GPUBindGroup;
   private bindB!: GPUBindGroup;
   private renderBindA!: GPUBindGroup;
@@ -45,6 +49,7 @@ export class WebGPUNeuralAutomataController {
   private activationCode = BASE_ACTIVATIONS["Exponential Linear Unit"];
   private normalizeInput = false;
   private computeKernel = true;
+  private channelCount = VISIBLE_CHANNELS;
 
   private maxFps: number;
   private frameInterval: number;
@@ -65,6 +70,7 @@ export class WebGPUNeuralAutomataController {
   private brushPixelBuffer: Uint8Array | null = null;
   private brushBufferWidth = 0;
   private brushBufferHeight = 0;
+  private brushHiddenRow: Float32Array | null = null;
 
   constructor(private config: AutomataConfig) {
     this.brushRadius = config.brushRadius ?? 20;
@@ -88,6 +94,10 @@ export class WebGPUNeuralAutomataController {
     this.texA = this.createTexture(this.gridSize);
     this.texB = this.createTexture(this.gridSize);
 
+    // Hidden channel state
+    this.hiddenA = this.createHiddenBuffer();
+    this.hiddenB = this.createHiddenBuffer();
+
     // Weights
     this.weightBuffer = this.createWeights();
 
@@ -95,12 +105,13 @@ export class WebGPUNeuralAutomataController {
     this.timestepBuffer = this.createTimestepBuffer();
 
     // Pipelines
+    this.computeBindGroupLayout = this.createComputeBindGroupLayout();
     this.computePipeline = await this.createComputePipeline(this.buildComputeShaderCode());
     this.renderPipeline  = await this.createRenderPipeline(renderShaderCode);
 
     // Bind groups
-    this.bindA = this.makeBindGroup(this.texA, this.texB);
-    this.bindB = this.makeBindGroup(this.texB, this.texA);
+    this.bindA = this.makeBindGroup(this.texA, this.texB, this.hiddenA, this.hiddenB);
+    this.bindB = this.makeBindGroup(this.texB, this.texA, this.hiddenB, this.hiddenA);
 
     // Precreate render bind groups for both textures
     this.renderBindA = this.device.createBindGroup({
@@ -138,6 +149,29 @@ export class WebGPUNeuralAutomataController {
     this.computeKernel = computeKernel ?? this.computeKernel;
   }
 
+  // Total channel count (3 visible + up to 8 hidden). The shader is templated
+  // on this, so changing it rebuilds the hidden buffers and the pipeline.
+  setChannelCount(count: number): void {
+    const clamped = clampChannelCount(count);
+    if (clamped === this.channelCount) return;
+    this.channelCount = clamped;
+    if (!this.device) return; // init() will pick up the new count
+
+    const oldA = this.hiddenA;
+    const oldB = this.hiddenB;
+    this.hiddenA = this.createHiddenBuffer();
+    this.hiddenB = this.createHiddenBuffer();
+    // Old buffers stay alive until the recompiled bind groups replace them
+    this.recompileComputePipeline().then(() => {
+      oldA?.destroy();
+      oldB?.destroy();
+    });
+  }
+
+  getChannelCount(): number {
+    return this.channelCount;
+  }
+
   setActivationFunctionCode(code: string) {
     this.activationCode = code;
     this.recompileComputePipeline();
@@ -160,6 +194,12 @@ export class WebGPUNeuralAutomataController {
 
     this.device.queue.writeTexture({ texture: this.texA, origin: [0, 0, 0] }, pixels, layout, size);
     this.device.queue.writeTexture({ texture: this.texB, origin: [0, 0, 0] }, pixels, layout, size);
+
+    const encoder = this.device.createCommandEncoder();
+    encoder.clearBuffer(this.hiddenA);
+    encoder.clearBuffer(this.hiddenB);
+    this.device.queue.submit([encoder.finish()]);
+
     this.timestep = 0;
   }
 
@@ -178,6 +218,17 @@ export class WebGPUNeuralAutomataController {
 
     this.device.queue.writeTexture({ texture: this.texA, origin: [0, 0, 0] }, pixels, layout, size);
     this.device.queue.writeTexture({ texture: this.texB, origin: [0, 0, 0] }, pixels, layout, size);
+
+    const hiddenCount = this.channelCount - VISIBLE_CHANNELS;
+    if (hiddenCount > 0) {
+      const hidden = new Float32Array(w * h * hiddenCount);
+      for (let i = 0; i < hidden.length; i++) {
+        hidden[i] = Math.random();
+      }
+      this.device.queue.writeBuffer(this.hiddenA, 0, hidden);
+      this.device.queue.writeBuffer(this.hiddenB, 0, hidden);
+    }
+
     this.timestep = 0;
   }
 
@@ -186,6 +237,8 @@ export class WebGPUNeuralAutomataController {
     const total = w * h;
     const pixels = new Uint8Array(total * 4);
     const borderThickness = this.brushRadius; // Use brush radius for thickness
+    const hiddenCount = this.channelCount - VISIBLE_CHANNELS;
+    const hidden = hiddenCount > 0 ? new Float32Array(total * hiddenCount) : null;
 
     // Fill background black (RGB=0) with alpha=255
     for (let i = 0; i < total; i++) {
@@ -209,6 +262,12 @@ export class WebGPUNeuralAutomataController {
           pixels[idx + 1] = 255;
           pixels[idx + 2] = 255;
           pixels[idx + 3] = 255;
+
+          if (hidden) {
+            for (let c = 0; c < hiddenCount; c++) {
+              hidden[(y * w + x) * hiddenCount + c] = 1;
+            }
+          }
         }
       }
     }
@@ -218,6 +277,11 @@ export class WebGPUNeuralAutomataController {
 
     this.device.queue.writeTexture({ texture: this.texA, origin: [0, 0, 0] }, pixels, layout, size);
     this.device.queue.writeTexture({ texture: this.texB, origin: [0, 0, 0] }, pixels, layout, size);
+
+    if (hidden) {
+      this.device.queue.writeBuffer(this.hiddenA, 0, hidden);
+      this.device.queue.writeBuffer(this.hiddenB, 0, hidden);
+    }
   }
 
   setMaxFps(fps: number): void {
@@ -249,11 +313,10 @@ export class WebGPUNeuralAutomataController {
   }
 
   private createWeights(): GPUBuffer {
-    const outputChannels = 3;
-    const inputChannels = 3;
-    const kernelSize = 5;
-    const weightsPerFilter = kernelSize * kernelSize;
-    const totalWeights = outputChannels * inputChannels * weightsPerFilter;
+    // Sized for the maximum channel count so changing channels never needs a
+    // buffer reallocation; the shader indexes by the active channel count
+    const weightsPerFilter = KERNEL_SIZE * KERNEL_SIZE;
+    const totalWeights = MAX_TOTAL_CHANNELS * MAX_TOTAL_CHANNELS * weightsPerFilter;
     const weights = new Float32Array(totalWeights);
 
     for (let i = 0; i < totalWeights; i++) {
@@ -290,9 +353,37 @@ export class WebGPUNeuralAutomataController {
     });
   }
 
+  private createHiddenBuffer(): GPUBuffer {
+    const [w, h] = this.gridSize;
+    const hiddenCount = this.channelCount - VISIBLE_CHANNELS;
+    // Bind groups always include the hidden buffers, so keep a minimal one
+    // alive even when the config has no hidden channels
+    const size = Math.max(16, w * h * hiddenCount * 4);
+    return this.device.createBuffer({
+      size,
+      usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
+    });
+  }
+
+  // Explicit layout so bindings the shader might not statically use (e.g. the
+  // hidden buffers when there are no hidden channels) stay bindable
+  private createComputeBindGroupLayout(): GPUBindGroupLayout {
+    return this.device.createBindGroupLayout({
+      entries: [
+        { binding: 0, visibility: GPUShaderStage.COMPUTE, texture: { sampleType: 'unfilterable-float' } },
+        { binding: 1, visibility: GPUShaderStage.COMPUTE, storageTexture: { access: 'write-only', format: this.format } },
+        { binding: 2, visibility: GPUShaderStage.COMPUTE, buffer: { type: 'read-only-storage' } },
+        { binding: 3, visibility: GPUShaderStage.COMPUTE, buffer: { type: 'uniform' } },
+        { binding: 4, visibility: GPUShaderStage.COMPUTE, buffer: { type: 'read-only-storage' } },
+        { binding: 5, visibility: GPUShaderStage.COMPUTE, buffer: { type: 'storage' } },
+      ],
+    });
+  }
+
   private async createComputePipeline(code: string): Promise<GPUComputePipeline> {
     const module = this.device.createShaderModule({ code });
-    return this.device.createComputePipeline({ layout: 'auto', compute: { module, entryPoint: 'main' } });
+    const layout = this.device.createPipelineLayout({ bindGroupLayouts: [this.computeBindGroupLayout] });
+    return this.device.createComputePipeline({ layout, compute: { module, entryPoint: 'main' } });
   }
 
   private async createRenderPipeline(code: string): Promise<GPURenderPipeline> {
@@ -305,17 +396,22 @@ export class WebGPUNeuralAutomataController {
     });
   }
 
+  private recompileSequence = 0;
+
   private async recompileComputePipeline() {
-    this.computePipeline = await this.createComputePipeline(this.buildComputeShaderCode());
-    this.bindA = this.makeBindGroup(this.texA, this.texB);
-    this.bindB = this.makeBindGroup(this.texB, this.texA);
+    const sequence = ++this.recompileSequence;
+    const pipeline = await this.createComputePipeline(this.buildComputeShaderCode());
+    if (sequence !== this.recompileSequence) return; // superseded by a newer recompile
+    this.computePipeline = pipeline;
+    this.bindA = this.makeBindGroup(this.texA, this.texB, this.hiddenA, this.hiddenB);
+    this.bindB = this.makeBindGroup(this.texB, this.texA, this.hiddenB, this.hiddenA);
   }
 
-  // Fills in variable segments of the compute shader 
+  // Fills in variable segments of the compute shader
   private buildComputeShaderCode(): string {
     return this.baseShaderCode.replace(
       '@activationFunction',
-      this.activationCode,
+      this.migrateCellStateAccess(this.activationCode),
     ).replace(
       '@normalizeFlag',
       this.normalizeInput ? NORMALIZE_TRUE : NORMALIZE_FALSE,
@@ -328,17 +424,39 @@ export class WebGPUNeuralAutomataController {
     ).replace(
       '@sizeHeight',
       this.gridSize[1],
+    ).replace(
+      '@channelCount',
+      `${this.channelCount}`,
+    ).replace(
+      '@hiddenCount',
+      `${this.channelCount - VISIBLE_CHANNELS}`,
     );
   }
 
-  private makeBindGroup(src: GPUTexture, dst: GPUTexture): GPUBindGroup {
+  // cellState is an array (arrays have no swizzles); rewrite the .r/.g/.b
+  // access used by configs written when it was a vec3
+  private migrateCellStateAccess(code: string): string {
+    return code
+      .replace(
+        /activationContext\.cellState\.rgb\b/g,
+        '(vec3<f32>(activationContext.cellState[0], activationContext.cellState[1], activationContext.cellState[2]))',
+      )
+      .replace(
+        /activationContext\.cellState\.([rgb])\b/g,
+        (_match, ch: string) => `activationContext.cellState[${'rgb'.indexOf(ch)}]`,
+      );
+  }
+
+  private makeBindGroup(src: GPUTexture, dst: GPUTexture, srcHidden: GPUBuffer, dstHidden: GPUBuffer): GPUBindGroup {
     return this.device.createBindGroup({
-      layout: this.computePipeline.getBindGroupLayout(0),
+      layout: this.computeBindGroupLayout,
       entries: [
         { binding: 0, resource: src.createView() },
         { binding: 1, resource: dst.createView() },
         { binding: 2, resource: { buffer: this.weightBuffer } },
         { binding: 3, resource: { buffer: this.timestepBuffer } },
+        { binding: 4, resource: { buffer: srcHidden } },
+        { binding: 5, resource: { buffer: dstHidden } },
       ],
     });
   }
@@ -503,6 +621,20 @@ export class WebGPUNeuralAutomataController {
       { bytesPerRow: width * 4, rowsPerImage: height },
       [width, height, 1]
     );
+
+    // The brush paints hidden channels to 1.0, matching the visible channels
+    const hiddenCount = this.channelCount - VISIBLE_CHANNELS;
+    if (hiddenCount > 0) {
+      const rowFloats = width * hiddenCount;
+      if (!this.brushHiddenRow || this.brushHiddenRow.length !== rowFloats) {
+        this.brushHiddenRow = new Float32Array(rowFloats).fill(1);
+      }
+      for (let row = minY; row <= maxY; row++) {
+        const byteOffset = (row * w + minX) * hiddenCount * 4;
+        this.device.queue.writeBuffer(this.hiddenA, byteOffset, this.brushHiddenRow);
+        this.device.queue.writeBuffer(this.hiddenB, byteOffset, this.brushHiddenRow);
+      }
+    }
   }
 
   private startLoop([w,h]: [number, number]) {
@@ -547,6 +679,7 @@ export class WebGPUNeuralAutomataController {
       // Ping-pong
       if (!this.paused) {
         [this.texA, this.texB] = [this.texB, this.texA];
+        [this.hiddenA, this.hiddenB] = [this.hiddenB, this.hiddenA];
         [this.bindA, this.bindB] = [this.bindB, this.bindA];
         this.updateRenderBind();
       }
@@ -582,6 +715,16 @@ export class WebGPUNeuralAutomataController {
     if (this.texB) {
       this.texB.destroy();
       this.texB = undefined as any;
+    }
+
+    // Destroy hidden channel buffers
+    if (this.hiddenA) {
+      this.hiddenA.destroy();
+      this.hiddenA = undefined as any;
+    }
+    if (this.hiddenB) {
+      this.hiddenB.destroy();
+      this.hiddenB = undefined as any;
     }
 
     // Clear other references

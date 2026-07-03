@@ -15,6 +15,7 @@ import ActivationVariableEditor from './widgets/ActivationVariableEditor.tsx';
 import { ActivationVariableUtils, VariableValue } from './utils/ActivationVariableUtils.ts';
 import WeightExplorer from './widgets/WeightExplorer.tsx';
 import { WeightExplorerController, Weights3D } from './controllers/WeightExplorerController.ts';
+import { ShareUtils } from './utils/ShareUtils.ts';
 
 
 const params = new URLSearchParams(window.location.search);
@@ -61,9 +62,19 @@ export default function WebGPUNeuralAutomata(): JSX.Element {
     weightExplorer.updateWeights(initialConfig.weights);
     
     controller.init().then(async () => {
-      handleWeightChange(initialConfig.weights)
-      controllerRef.current?.setActivationParameters(initialConfig.normalize);
-      controllerRef.current?.setActivationFunctionCode(ActivationVariableUtils.transformActivationCodeDefault(initialConfig.activationCode));
+      // A shared config in the URL hash takes priority over the default
+      const sharedConfig = await ShareUtils.loadFromUrl();
+      if (sharedConfig) {
+        handleConfigLoad(sharedConfig.weights, {
+          code: sharedConfig.activationCode,
+          normalize: sharedConfig.normalize,
+          computeKernel: sharedConfig.computeKernel ?? true,
+        });
+      } else {
+        handleWeightChange(initialConfig.weights)
+        controllerRef.current?.setActivationParameters(initialConfig.normalize);
+        controllerRef.current?.setActivationFunctionCode(ActivationVariableUtils.transformActivationCodeDefault(initialConfig.activationCode));
+      }
       controllerRef.current?.randomizeCanvas();
     }).catch((err) => {
       console.error(err);
@@ -173,6 +184,8 @@ export default function WebGPUNeuralAutomata(): JSX.Element {
 
   const handleWeightChange = (updatedWeights: number[][][][]) => {
     setWeights(updatedWeights);
+    // The weights shape defines the channel count (3 visible + any hidden)
+    controllerRef.current?.setChannelCount(updatedWeights.length);
     controllerRef.current?.updateWeights(updatedWeights.flat(3));
     weightExplorerRef.current?.updateWeights(updatedWeights);
   };

@@ -18,6 +18,16 @@
   gap: 1rem;
 }
 
+.groupSummary {
+  cursor: pointer;
+  user-select: none;
+}
+
+.groupSummary h2 {
+  display: inline-block;
+  margin: 0;
+}
+
 .copyContainer {
   display: flex;
   align-items: center;
