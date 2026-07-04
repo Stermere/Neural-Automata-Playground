@@ -10,6 +10,17 @@ const KERNEL_AREA: u32 = u32(KERNEL_SIZE * KERNEL_SIZE);
 
 @computeKernelFlag
 
+// MLP stage (trained kernels): a per-cell two-layer MLP
+// (hidden ReLU layer, then an output layer) applied to the conv results
+// before the activation, giving the update rule a genuine nonlinearity.
+@useMlpFlag
+const MLP_HIDDEN: u32 = @mlpHiddenu;
+// Offsets into the flat mlpWeights buffer:
+// [w1: MLP_HIDDEN x CHANNEL_COUNT][b1: MLP_HIDDEN][w2: CHANNEL_COUNT x MLP_HIDDEN][b2: CHANNEL_COUNT]
+const MLP_B1_OFFSET: u32 = MLP_HIDDEN * CHANNEL_COUNT;
+const MLP_W2_OFFSET: u32 = MLP_B1_OFFSET + MLP_HIDDEN;
+const MLP_B2_OFFSET: u32 = MLP_W2_OFFSET + CHANNEL_COUNT * MLP_HIDDEN;
+
 // Bindings
 @group(0) @binding(0)
 var src: texture_2d<f32>;
@@ -29,6 +40,11 @@ var<storage, read> hiddenSrc: array<f32>;
 
 @group(0) @binding(5)
 var<storage, read_write> hiddenDst: array<f32>;
+
+// Per-cell MLP weights, used when USE_MLP (see the offset constants above
+// for the layout); a minimal placeholder buffer is bound otherwise
+@group(0) @binding(6)
+var<storage, read> mlpWeights: array<f32>;
 
 // Coordinate wrapping
 fn wrapCoord(x: i32, y: i32) -> vec2<i32> {
@@ -120,6 +136,32 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
         }
       }
     }
+  }
+
+  if (USE_MLP) {
+    // Per-cell MLP between the conv results and the activation:
+    // hidden layer relu(w1 . sums + b1) ...
+    var hiddenAct: array<f32, MLP_HIDDEN>;
+    for (var j: u32 = 0u; j < MLP_HIDDEN; j++) {
+      var acc: f32 = mlpWeights[MLP_B1_OFFSET + j];
+      for (var ch: u32 = 0u; ch < CHANNEL_COUNT; ch++) {
+        acc += mlpWeights[j * CHANNEL_COUNT + ch] * sums[ch];
+      }
+      hiddenAct[j] = max(acc, 0.0);
+    }
+
+    // ... then the output layer becomes the per-channel update signal,
+    // handed to the exported activation exactly like the raw convX
+    var mlpOut: array<f32, CHANNEL_COUNT>;
+    for (var outCh: u32 = 0u; outCh < CHANNEL_COUNT; outCh++) {
+      var acc: f32 = mlpWeights[MLP_B2_OFFSET + outCh];
+      for (var j: u32 = 0u; j < MLP_HIDDEN; j++) {
+        acc += mlpWeights[MLP_W2_OFFSET + outCh * MLP_HIDDEN + j] * hiddenAct[j];
+      }
+      mlpOut[outCh] = acc;
+      totalWeights[outCh] = 1.0;
+    }
+    sums = mlpOut;
   }
 
   activationContext.timestep = timestepData.x;

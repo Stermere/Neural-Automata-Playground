@@ -1,6 +1,7 @@
 """Live training dashboard: a plotext loss curve plus a stats table, redrawn
 in place with rich.Live instead of scrolling the terminal with one print per
 logging step."""
+import sys
 import time
 
 import plotext as plt
@@ -9,6 +10,12 @@ from rich.live import Live
 from rich.panel import Panel
 from rich.table import Table
 from rich.text import Text
+
+# The chart uses Unicode braille/box characters; when stdout is redirected or
+# the console is legacy Windows, its encoding can be cp1252 and printing the
+# dashboard raises UnicodeEncodeError. Degrade to '?' instead of crashing.
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(errors="replace")
 
 _MAX_POINTS = 400  # halve resolution past this so long runs stay responsive
 # (metric key, display label, plot color) - key is what callers pass to update()

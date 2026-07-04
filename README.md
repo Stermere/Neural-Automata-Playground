@@ -35,9 +35,10 @@ This project uses a GPU compute shader to apply 5×5 convolution filters over a 
 
 ## Overview
 
-- Each pixel is updated using a 5×5 convolution per color channel (R, G, B).
-- You can modify **225 total weights** (3 output × 3 input × 5 pixels × 5 pixels) in real time.
+- Each pixel is updated using a 5×5 convolution over up to 16 channels — 3 visible (R, G, B) plus up to 13 hidden memory channels.
+- You can modify every kernel weight in real time (225 for a plain RGB config, more as channels are added).
 - Supports a nearly unlimited variety of activation functions, if you can write it in WGSL you can use it! 
+- Pre-trained patterns (see `kernalPreTraining/`) can add a per-cell MLP between the convolution and the activation, for update rules a single conv can't express — the conv weights stay editable either way.
 - Built with WebGPU and React.
 
 ## Getting Started

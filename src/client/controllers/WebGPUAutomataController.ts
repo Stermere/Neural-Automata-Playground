@@ -2,11 +2,14 @@ import computeShaderCode from '../../shaders/compute.wgsl?raw';
 import renderShaderCode from '../../shaders/render.wgsl?raw';
 import { BASE_ACTIVATIONS } from '../constants/baseActivations';
 import { VISIBLE_CHANNELS, MAX_TOTAL_CHANNELS, KERNEL_SIZE, clampChannelCount } from '../constants/channelConstants';
+import { MlpConfig, MlpUtils } from '../utils/MlpUtils';
 
 const NORMALIZE_TRUE = 'let norm = x / max(weightSum, 1e-5);';
 const NORMALIZE_FALSE = 'let norm = x;'
 const COMPUTE_KERNEL_TRUE = 'var<private> COMPUTE_KERNEL: bool = true;';
 const COMPUTE_KERNEL_FALSE = 'var<private> COMPUTE_KERNEL: bool = false;';
+const USE_MLP_TRUE = 'var<private> USE_MLP: bool = true;';
+const USE_MLP_FALSE = 'var<private> USE_MLP: bool = false;';
 
 export interface AutomataConfig {
   canvas: HTMLCanvasElement;
@@ -24,6 +27,7 @@ export class WebGPUNeuralAutomataController {
   private sampler!: GPUSampler;
 
   private weightBuffer!: GPUBuffer;
+  private mlpBuffer!: GPUBuffer;
   private texA!: GPUTexture;
   private texB!: GPUTexture;
   private hiddenA!: GPUBuffer;
@@ -50,6 +54,7 @@ export class WebGPUNeuralAutomataController {
   private normalizeInput = false;
   private computeKernel = true;
   private channelCount = VISIBLE_CHANNELS;
+  private mlp: MlpConfig | null = null;
 
   private maxFps: number;
   private frameInterval: number;
@@ -100,6 +105,7 @@ export class WebGPUNeuralAutomataController {
 
     // Weights
     this.weightBuffer = this.createWeights();
+    this.mlpBuffer = this.createMlpBuffer();
 
     // Timestep + Click data
     this.timestepBuffer = this.createTimestepBuffer();
@@ -153,6 +159,10 @@ export class WebGPUNeuralAutomataController {
   // on this, so changing it rebuilds the hidden buffers and the pipeline.
   setChannelCount(count: number): void {
     const clamped = clampChannelCount(count);
+    if (clamped !== count) {
+      console.error(`Config has ${count} channels but the playground supports at most `
+        + `${MAX_TOTAL_CHANNELS}; weights will not line up with the shader.`);
+    }
     if (clamped === this.channelCount) return;
     this.channelCount = clamped;
     if (!this.device) return; // init() will pick up the new count
@@ -170,6 +180,20 @@ export class WebGPUNeuralAutomataController {
 
   getChannelCount(): number {
     return this.channelCount;
+  }
+
+  // Per-cell MLP of a trained kernel (null returns to the plain conv path).
+  // The shader is templated on the hidden size, so this rebuilds the pipeline.
+  setMlpWeights(mlp: MlpConfig | null): void {
+    this.mlp = mlp;
+    if (!this.device) return; // init() will pick up the config
+
+    const old = this.mlpBuffer;
+    this.mlpBuffer = this.createMlpBuffer();
+    // Old buffer stays alive until the recompiled bind groups replace it
+    this.recompileComputePipeline().then(() => {
+      old?.destroy();
+    });
   }
 
   setActivationFunctionCode(code: string) {
@@ -336,6 +360,22 @@ export class WebGPUNeuralAutomataController {
     return buffer;
   }
 
+  private createMlpBuffer(): GPUBuffer {
+    // Bind groups always include the MLP buffer, so keep a minimal one alive
+    // even when the config has no MLP (same trick as the hidden buffers)
+    const data = this.mlp ? MlpUtils.flatten(this.mlp) : null;
+    const buffer = this.device.createBuffer({
+      size: Math.max(16, data?.byteLength ?? 0),
+      usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
+      mappedAtCreation: !!data,
+    });
+    if (data) {
+      new Float32Array(buffer.getMappedRange()).set(data);
+      buffer.unmap();
+    }
+    return buffer;
+  }
+
   private createTimestepBuffer(): GPUBuffer {
     const buffer = this.device.createBuffer({
       size: 4 * 4, // timestep, clickX, clickY, unused
@@ -376,6 +416,7 @@ export class WebGPUNeuralAutomataController {
         { binding: 3, visibility: GPUShaderStage.COMPUTE, buffer: { type: 'uniform' } },
         { binding: 4, visibility: GPUShaderStage.COMPUTE, buffer: { type: 'read-only-storage' } },
         { binding: 5, visibility: GPUShaderStage.COMPUTE, buffer: { type: 'storage' } },
+        { binding: 6, visibility: GPUShaderStage.COMPUTE, buffer: { type: 'read-only-storage' } },
       ],
     });
   }
@@ -430,6 +471,12 @@ export class WebGPUNeuralAutomataController {
     ).replace(
       '@hiddenCount',
       `${this.channelCount - VISIBLE_CHANNELS}`,
+    ).replace(
+      '@useMlpFlag',
+      this.mlp ? USE_MLP_TRUE : USE_MLP_FALSE,
+    ).replace(
+      '@mlpHidden',
+      `${this.mlp?.hiddenDim ?? 1}`,
     );
   }
 
@@ -457,6 +504,7 @@ export class WebGPUNeuralAutomataController {
         { binding: 3, resource: { buffer: this.timestepBuffer } },
         { binding: 4, resource: { buffer: srcHidden } },
         { binding: 5, resource: { buffer: dstHidden } },
+        { binding: 6, resource: { buffer: this.mlpBuffer } },
       ],
     });
   }
@@ -701,6 +749,10 @@ export class WebGPUNeuralAutomataController {
     if (this.weightBuffer) {
       this.weightBuffer.destroy();
       this.weightBuffer = undefined as any;
+    }
+    if (this.mlpBuffer) {
+      this.mlpBuffer.destroy();
+      this.mlpBuffer = undefined as any;
     }
     if (this.timestepBuffer) {
       this.timestepBuffer.destroy();

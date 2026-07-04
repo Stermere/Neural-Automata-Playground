@@ -9,8 +9,8 @@ The implementation lives in the sibling modules:
 """
 import argparse
 
-from ca_model import UPDATE_RULES
-from parity import verify_shader_parity
+from ca_model import PLAYGROUND_MAX_CHANNELS, UPDATE_RULES
+from parity import verify_shader_parity, verify_shader_parity_mlp
 from paths import default_image
 from trainer import CATrainer
 
@@ -31,6 +31,10 @@ if __name__ == "__main__":
     parser.add_argument("--fire-rate", type=float, default=0.5,
                         help="probability a cell applies its update each step (stochastic "
                              "updates, exported as a hash gate); 1.0 disables the gate")
+    parser.add_argument("--mlp-hidden", type=int, default=128,
+                        help="hidden units of the per-cell MLP inserted between the 5x5 "
+                             "conv outputs and the update rule (conv -> ReLU layer -> "
+                             "output layer); 0 trains the legacy conv-only kernel")
     parser.add_argument("--steps", type=int, default=400, help="animation steps")
     parser.add_argument("--min-steps", type=int, default=None,
                         help="min rollout steps per training epoch; default = --size")
@@ -70,17 +74,26 @@ if __name__ == "__main__":
     parser.add_argument("-y", "--export", action="store_true", help="export without prompting")
     args = parser.parse_args()
 
-    verify_shader_parity(channels=args.channels, rule=args.rule, delta=args.delta,
-                         fire_rate=args.fire_rate)
+    if args.channels > PLAYGROUND_MAX_CHANNELS:
+        parser.error(f"--channels {args.channels} exceeds the playground's maximum of "
+                     f"{PLAYGROUND_MAX_CHANNELS} — the export would load as garbage in the browser")
+
+    if args.mlp_hidden:
+        verify_shader_parity_mlp(channels=args.channels, rule=args.rule, delta=args.delta,
+                                 fire_rate=args.fire_rate)
+    else:
+        verify_shader_parity(channels=args.channels, rule=args.rule, delta=args.delta,
+                             fire_rate=args.fire_rate)
 
     trainer = CATrainer(args.image, img_size=args.size, channels=args.channels,
                         pool_size=args.pool_size, batch_size=args.batch_size,
                         lr=args.lr, rule=args.rule, delta=args.delta, margin=args.margin,
                         fire_rate=args.fire_rate, fg_weight=args.fg_weight,
-                        checkpoint_dir=args.checkpoint_dir)
+                        mlp_hidden=args.mlp_hidden, checkpoint_dir=args.checkpoint_dir)
+    arch = f"mlp_hidden={args.mlp_hidden}" if args.mlp_hidden else "legacy 5x5 conv"
     print(f"Training on {args.image} ({args.size}px, margin={trainer.margin}px, "
-          f"{args.channels} channels, pool={args.pool_size}, batch={args.batch_size}, "
-          f"device={trainer.device})")
+          f"{args.channels} channels, {arch}, pool={args.pool_size}, "
+          f"batch={args.batch_size}, device={trainer.device})")
     print(f"Checkpoints: {trainer.checkpoint_dir}")
 
     trainer.train(epochs=args.epochs, min_steps=args.min_steps, max_steps=args.max_steps,

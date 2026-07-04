@@ -27,7 +27,7 @@ import matplotlib.pyplot as plt
 import torch
 from matplotlib.animation import FuncAnimation
 
-from ca_model import CAModel, UPDATE_RULES
+from ca_model import UPDATE_RULES, model_from_checkpoint
 from preview_utils import latest_checkpoint, make_grid_axes, rgb_of, rollout_frames, save_animation
 
 
@@ -60,14 +60,12 @@ def main():
     if not config:
         print(f"No saved config in {ckpt_path} (older checkpoint) — "
               f"falling back to defaults/overrides for size/rule/fire-rate.")
-    channels = checkpoint["model_state"]["conv.weight"].shape[0]
-    rule = args.rule if args.rule is not None else config.get("rule", "tanh")
-    fire_rate = args.fire_rate if args.fire_rate is not None else config.get("fire_rate", 0.5)
     base_size = args.size if args.size is not None else config.get("size", 48)
 
-    model = CAModel(channels=channels, rule=rule, fire_rate=fire_rate).to(device)
-    model.load_state_dict(checkpoint["model_state"])
+    # picks CAModel or MLPCAModel from the state-dict shape automatically
+    model = model_from_checkpoint(checkpoint, rule=args.rule, fire_rate=args.fire_rate).to(device)
     model.eval()
+    channels = model.channels
 
     size = base_size + args.canvas_extra
     hidden = channels - 3

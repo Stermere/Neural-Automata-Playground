@@ -30,14 +30,15 @@ import time
 
 import torch
 
-from parity import verify_shader_parity
+from parity import verify_shader_parity, verify_shader_parity_mlp
 from paths import checkpoints_root, default_image
 from trainer import CATrainer
 
 # sweepable name -> CATrainer.__init__ keyword
 TRAINER_KEYS = {"size": "img_size", "channels": "channels", "pool_size": "pool_size",
                 "batch_size": "batch_size", "lr": "lr", "delta": "delta", "rule": "rule",
-                "margin": "margin", "fire_rate": "fire_rate", "fg_weight": "fg_weight"}
+                "margin": "margin", "fire_rate": "fire_rate", "fg_weight": "fg_weight",
+                "mlp_hidden": "mlp_hidden"}
 # sweepable names passed straight to CATrainer.train
 TRAIN_KEYS = ("epochs", "min_steps", "max_steps", "overflow_weight", "leak_weight",
               "edge_weight", "damage_n", "grad_ckpt_steps")
@@ -90,6 +91,9 @@ def main():
     parser.add_argument("--image", default=default_image)
     parser.add_argument("--size", type=int, default=48)
     parser.add_argument("--channels", type=int, default=11)
+    parser.add_argument("--mlp-hidden", type=int, default=128,
+                        help="hidden units of the per-cell MLP for runs that don't sweep "
+                             "mlp-hidden; 0 trains the legacy conv-only kernel")
     parser.add_argument("--epochs", type=int, default=1200,
                         help="epochs per config — a screening budget; re-train the winner "
                              "with Train.py at full length")
@@ -104,7 +108,12 @@ def main():
                              "under kernalPreTraining/checkpoints")
     args = parser.parse_args()
 
+    from ca_model import PLAYGROUND_MAX_CHANNELS
     grid = parse_grid(args.sweep)
+    for ch in grid.get("channels", [args.channels]):
+        if ch > PLAYGROUND_MAX_CHANNELS:
+            raise SystemExit(f"channels={ch} exceeds the playground's maximum of "
+                             f"{PLAYGROUND_MAX_CHANNELS} — the export would load as garbage")
     names = list(grid)
     combos = list(itertools.product(*(grid[n] for n in names)))
     sweep_dir = args.sweep_dir or os.path.join(
@@ -115,7 +124,13 @@ def main():
     # one parity check per shader-affecting combo before burning GPU-hours
     for rule in set(grid.get("rule", ["tanh"])):
         for fire_rate in set(grid.get("fire_rate", [0.5])):
-            verify_shader_parity(channels=args.channels, rule=rule, fire_rate=fire_rate)
+            for mlp_hidden in set(grid.get("mlp_hidden", [args.mlp_hidden])):
+                if mlp_hidden:
+                    verify_shader_parity_mlp(channels=args.channels, rule=rule,
+                                             fire_rate=fire_rate)
+                else:
+                    verify_shader_parity(channels=args.channels, rule=rule,
+                                         fire_rate=fire_rate)
 
     print(f"Sweeping {len(combos)} configurations -> {sweep_dir}")
     runs = []
@@ -125,7 +140,8 @@ def main():
             label = " ".join(f"{k}={v}" for k, v in overrides.items())
             run_dir = os.path.join(sweep_dir, f"run{i:03d}")
 
-            trainer_kwargs = {"img_size": args.size, "channels": args.channels}
+            trainer_kwargs = {"img_size": args.size, "channels": args.channels,
+                              "mlp_hidden": args.mlp_hidden}
             train_kwargs = {"epochs": args.epochs, "print_every": args.print_every,
                             "checkpoint_every": 0, "catch_interrupt": False,
                             "label": f"run {i}/{len(combos)}: {label}"}

@@ -29,7 +29,7 @@ import matplotlib.pyplot as plt
 import torch
 from matplotlib.animation import FuncAnimation
 
-from ca_model import CAModel
+from ca_model import model_from_checkpoint
 from paths import checkpoints_root
 from preview_utils import latest_checkpoint, make_grid_axes, rgb_of, rollout_frames, save_animation
 
@@ -42,18 +42,12 @@ def find_latest_sweep():
 
 
 def build_model(run, meta, canvas_extra, device):
-    params = run["params"]
-    channels = params.get("channels", meta["channels"])
-    rule = params.get("rule", "tanh")
-    fire_rate = params.get("fire_rate", 0.5)
-    delta = params.get("delta", 0.25)  # overwritten by the loaded checkpoint anyway
-    size = params.get("size", meta["size"]) + canvas_extra
-
-    model = CAModel(channels=channels, delta=delta, rule=rule, fire_rate=fire_rate).to(device)
+    size = run["params"].get("size", meta["size"]) + canvas_extra
     checkpoint = torch.load(latest_checkpoint(run["dir"]), map_location=device)
-    model.load_state_dict(checkpoint["model_state"])
+    # architecture, channels, rule and fire_rate all come from the checkpoint
+    model = model_from_checkpoint(checkpoint).to(device)
     model.eval()
-    return model, channels, size
+    return model, model.channels, size
 
 
 def run_title(run):

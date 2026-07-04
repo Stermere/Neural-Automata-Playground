@@ -16,6 +16,7 @@ import { ActivationVariableUtils, VariableValue } from './utils/ActivationVariab
 import WeightExplorer from './widgets/WeightExplorer.tsx';
 import { WeightExplorerController, Weights3D } from './controllers/WeightExplorerController.ts';
 import { ShareUtils } from './utils/ShareUtils.ts';
+import { MlpConfig } from './utils/MlpUtils.ts';
 
 
 const params = new URLSearchParams(window.location.search);
@@ -34,6 +35,7 @@ export default function WebGPUNeuralAutomata(): JSX.Element {
   const [activationCode, setActivationCode] = useState(initialConfig.activationCode);
   const [activationVariables, setActivationVariables] = useState(ActivationVariableUtils.getDefaultVariableValues(ActivationVariableUtils.getVariables(initialConfig.activationCode)));
   const [normalizeInputToActivation, setNormalize] = useState(initialConfig.normalize);
+  const [mlp, setMlp] = useState<MlpConfig | null>(initialConfig.mlp ?? null);
   const [zoom, setZoom] = useState(1);
   const [selectedTabIndex, setSelectedTabIndex] = useState(0);
   const [webgpuError, setWebgpuError] = useState<string | null>(null);
@@ -69,7 +71,7 @@ export default function WebGPUNeuralAutomata(): JSX.Element {
           code: sharedConfig.activationCode,
           normalize: sharedConfig.normalize,
           computeKernel: sharedConfig.computeKernel ?? true,
-        });
+        }, sharedConfig.mlp ?? null);
       } else {
         handleWeightChange(initialConfig.weights)
         controllerRef.current?.setActivationParameters(initialConfig.normalize);
@@ -175,9 +177,13 @@ export default function WebGPUNeuralAutomata(): JSX.Element {
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [controlsVisible]);
 
-  const handleConfigLoad = (updatedWeights: number[][][][], updatedActivation: { code: string; normalize: boolean, computeKernel: boolean }) => {
+  const handleConfigLoad = (updatedWeights: number[][][][], updatedActivation: { code: string; normalize: boolean, computeKernel: boolean }, updatedMlp?: MlpConfig | null) => {
     const activationVariables = ActivationVariableUtils.getDefaultVariableValues(ActivationVariableUtils.getVariables(updatedActivation.code))
     setActivationVariables(activationVariables);
+    // Configs without an mlp block clear any previous one, returning the
+    // shader to the plain conv path
+    setMlp(updatedMlp ?? null);
+    controllerRef.current?.setMlpWeights(updatedMlp ?? null);
     handleWeightChange(updatedWeights);
     handleActivationChange(updatedActivation, activationVariables);
   };
@@ -245,12 +251,13 @@ export default function WebGPUNeuralAutomata(): JSX.Element {
           onBrushSizeChange={(size: number) => controllerRef.current?.setBrushSize(size)}
           initialZoom={zoom}
         />
-        <NeuralAutomataConfig 
+        <NeuralAutomataConfig
           weights={weights}
-          activationCode={activationCode} 
+          activationCode={activationCode}
           normalize={normalizeInputToActivation}
           activationVariables={activationVariables}
-          onLoad={handleConfigLoad} 
+          mlp={mlp}
+          onLoad={handleConfigLoad}
         />
 
         <ContentSwitcher labels={['Explanation', 'Weight Editor', 'Activation Editor', 'Variable Editor', 'Weight Explorer', 'None']} setSelectedIndex={setSelectedTabIndex}>

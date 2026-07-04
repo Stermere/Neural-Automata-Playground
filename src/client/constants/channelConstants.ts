@@ -4,7 +4,7 @@
 // through the kernel. The channel count of a config is implied by the shape
 // of its weights array: weights.length == total channels.
 export const VISIBLE_CHANNELS = 3;
-export const MAX_HIDDEN_CHANNELS = 8;
+export const MAX_HIDDEN_CHANNELS = 13;
 export const MAX_TOTAL_CHANNELS = VISIBLE_CHANNELS + MAX_HIDDEN_CHANNELS;
 export const KERNEL_SIZE = 5;
 

@@ -12,8 +12,9 @@ import torch.optim as optim
 from matplotlib.animation import FuncAnimation
 from torch.utils.checkpoint import checkpoint as grad_checkpoint
 
-from ca_model import CAModel, quantize_visible, wgsl_gate_mask
+from ca_model import CAModel, MLPCAModel, quantize_visible, wgsl_gate_mask
 from paths import checkpoints_root
+from preview_utils import make_grid_axes
 from progress import TrainingMonitor
 from targets import load_target_content, make_seed, pad_to_canvas
 
@@ -21,7 +22,8 @@ from targets import load_target_content, make_seed, pad_to_canvas
 class CATrainer:
     def __init__(self, img_path, img_size=48, channels=11, pool_size=256,
                  batch_size=8, lr=1e-3, delta=0.25, rule="tanh", margin=None,
-                 fire_rate=0.5, fg_weight=3.0, device=None, checkpoint_dir=None):
+                 fire_rate=0.5, fg_weight=3.0, mlp_hidden=128, device=None,
+                 checkpoint_dir=None):
         self.device = device or ('cuda' if torch.cuda.is_available() else 'cpu')
         image_name = os.path.splitext(os.path.basename(img_path))[0]
         self.checkpoint_dir = checkpoint_dir or os.path.join(
@@ -34,8 +36,15 @@ class CATrainer:
         # the training canvas border (~15% dead space per side).
         self.margin = margin if margin is not None else max(4, round(img_size * 0.15))
 
-        self.model = CAModel(channels=channels, delta=delta, rule=rule,
-                             fire_rate=fire_rate).to(self.device)
+        # mlp_hidden > 0 adds a per-cell MLP between the 5x5 conv outputs and
+        # the update rule; 0 falls back to the legacy conv-only kernel
+        if mlp_hidden:
+            self.model = MLPCAModel(channels=channels, hidden_dim=mlp_hidden,
+                                    delta=delta, rule=rule,
+                                    fire_rate=fire_rate).to(self.device)
+        else:
+            self.model = CAModel(channels=channels, delta=delta, rule=rule,
+                                 fire_rate=fire_rate).to(self.device)
         self.target_content = load_target_content(img_path, img_size - 2 * self.margin).to(self.device)
         self.target = pad_to_canvas(self.target_content, img_size).unsqueeze(0).to(self.device)
         self.seed = make_seed(channels, img_size).to(self.device)
@@ -116,7 +125,8 @@ class CATrainer:
             # lets checkpoint_preview.py regrow this pattern without the
             # caller having to know how it was trained
             "config": {"size": self.size, "channels": self.channels,
-                       "rule": self.model.rule, "fire_rate": self.model.fire_rate},
+                       "rule": self.model.rule, "fire_rate": self.model.fire_rate,
+                       "mlp_hidden": getattr(self.model, "hidden_dim", 0)},
         }, os.path.join(self.checkpoint_dir, f"{stem}.pt"))
 
         self.model.exportToPlaygroundFormat(self.checkpoint_dir, filepath=f"{stem}.json")
@@ -309,9 +319,8 @@ class CATrainer:
 
         hidden = self.channels - 3
         if show_hidden and hidden > 0:
-            rows, cols = 3, 4
-            fig, axes = plt.subplots(rows, cols, figsize=(cols * 2.5, rows * 2.5))
-            axes = axes.ravel()
+            # grid scales with the channel count (RGB pane + one per hidden)
+            fig, axes = make_grid_axes(1 + hidden)
             ims = [axes[0].imshow(frames[0][0, :3].permute(1, 2, 0).cpu())]
             axes[0].set_title("RGB")
             for h in range(hidden):

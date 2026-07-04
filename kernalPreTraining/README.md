@@ -6,18 +6,27 @@ from a single seed pixel, sample-pool training for long-term persistence,
 random damage for regeneration — then exports it as a config the WebGPU
 playground can import directly.
 
-Beyond the 5x5 conv weights, the kernel carries a per-channel bias, a
-per-channel learned update rate, and stochastic updates (each cell applies its
-update with probability `--fire-rate` per step). All three ship inside the
-exported activation code — `NCA_BIAS` / `NCA_DELTA` arrays and a deterministic
-`ncaGate()` hash of (x, y, timestep) — so no shader changes are needed.
-Training also rounds the visible channels to 8 bits every step, exactly like
-the browser's rgba8unorm texture, so long deployed rollouts don't drift from
-what the kernel saw in training.
+By default the update rule is a 5x5 conv followed by a per-cell two-layer MLP
+(`--mlp-hidden` units: conv outputs -> ReLU layer -> output layer). The MLP is
+the genuinely nonlinear step a single convolution can't express — it's what
+lets detailed images converge instead of plateauing into blur — and it ships
+in the export as an `mlp` block the shader applies between the conv results
+and the activation. The conv weights themselves stay a normal part of the
+config, so trained patterns remain editable in the playground's weight editor.
+`--mlp-hidden 0` trains the legacy conv-only kernel.
+
+Beyond that, the kernel carries a per-channel bias (conv-only; the MLP's
+biases live in the `mlp` block), a per-channel learned update rate, and
+stochastic updates (each cell applies its update with probability
+`--fire-rate` per step). These ship inside the exported activation code —
+`NCA_BIAS` / `NCA_DELTA` arrays and a deterministic `ncaGate()` hash of
+(x, y, timestep). Training also rounds the visible channels to 8 bits every
+step, exactly like the browser's rgba8unorm texture, so long deployed
+rollouts don't drift from what the kernel saw in training.
 
 The exported kernel is mathematically matched to `src/shaders/compute.wgsl`
-(same 5x5 circular convolution, same per-channel clamp), verified automatically
-every run by a parity check before training starts.
+(same 5x5 circular convolution, same per-cell MLP, same per-channel clamp),
+verified automatically every run by a parity check before training starts.
 
 ## Layout
 
@@ -25,7 +34,7 @@ every run by a parity check before training starts.
 |---|---|
 | `src/Train.py` | CLI entry point — train one config, evaluate, export, animate |
 | `src/grid_search.py` | CLI entry point — sweep hyperparameters, score and rank configs |
-| `src/ca_model.py` | `CAModel`, update rules, exported WGSL templates, browser-exact quantization and stochastic-gate helpers |
+| `src/ca_model.py` | `CAModel` (conv-only) and `MLPCAModel` (conv + per-cell MLP), update rules, exported WGSL templates, browser-exact quantization and stochastic-gate helpers |
 | `src/trainer.py` | `CATrainer` — training loop, robustness evaluation, animation |
 | `src/targets.py` | Seed and target-image helpers |
 | `src/parity.py` | Shader parity check |
@@ -42,8 +51,8 @@ kernalPreTraining/.venv/Scripts/pip install -r kernalPreTraining/requirements.tx
 
 ## Usage
 
-Train with defaults (Emoji.png, 48px, 11 channels, 4000 epochs, tanh rule) and
-export + animate at the end:
+Train with defaults (Emoji.png, 48px, 11 channels, 128-unit MLP, 4000 epochs,
+tanh rule) and export + animate at the end:
 
 ```
 kernalPreTraining/.venv/Scripts/python.exe kernalPreTraining/src/Train.py -y
@@ -58,7 +67,8 @@ Without `-y` you'll be prompted `Save pattern? ` after training finishes.
 | `--image` | `trainingImages/Emoji.png` | Target image to grow (also try `Fall.png`, `Wave.png`) |
 | `--size` | `48` | Training grid size in pixels — smaller trains faster, good for smoke tests |
 | `--epochs` | `4000` | Training iterations |
-| `--channels` | `11` | Total channels (3 visible + hidden); max the playground supports is 11 |
+| `--channels` | `11` | Total channels (3 visible + hidden); max the playground supports is 16 |
+| `--mlp-hidden` | `128` | Hidden units of the per-cell MLP between the conv outputs and the update rule; `0` trains the legacy conv-only kernel |
 | `--pool-size` | `256` | Number of persistent samples kept in the training pool |
 | `--batch-size` | `8` | Samples drawn from the pool per training step |
 | `--lr` | `1e-3` | Adam learning rate |
@@ -108,8 +118,8 @@ kernalPreTraining/.venv/Scripts/python.exe kernalPreTraining/src/grid_search.py 
 ```
 
 Searchable: `size, channels, pool-size, batch-size, lr, delta, rule, margin,
-fire-rate, fg-weight, epochs, min-steps, max-steps, overflow-weight,
-leak-weight, edge-weight, damage-n, grad-ckpt-steps`.
+fire-rate, fg-weight, mlp-hidden, epochs, min-steps, max-steps,
+overflow-weight, leak-weight, edge-weight, damage-n, grad-ckpt-steps`.
 
 Each run gets its own subfolder (final checkpoint + `TrainedWeights.json`)
 under a timestamped `gridsearch_*` folder; `results.json` is rewritten after
@@ -120,11 +130,20 @@ re-train the winner at full length with Train.py.
 
 ## Output
 
-Exports to `~/Downloads/TrainedWeights.json`:
+Exports `TrainedWeights.json` into the run's checkpoint folder:
 
 ```jsonc
 {
   "weights": [ /* [outChannel][inChannel][5][5] nested array */ ],
+  // the per-cell MLP the shader applies to the conv results, flattened
+  // into a storage buffer as [w1][b1][w2][b2]; absent for --mlp-hidden 0
+  "mlp": {
+    "hiddenDim": 128,
+    "w1": [ /* [hiddenDim][channels] */ ],
+    "b1": [ /* [hiddenDim] */ ],
+    "w2": [ /* [channels][hiddenDim] */ ],
+    "b2": [ /* [channels] */ ]
+  },
   // WGSL: NCA_DELTA / NCA_BIAS per-channel arrays, the ncaGate() stochastic
   // update hash, and the activation function that ties them together
   "activationCode": "var<private> NCA_DELTA ... fn activation(convX: f32) -> f32 { ... }",
@@ -133,7 +152,9 @@ Exports to `~/Downloads/TrainedWeights.json`:
 ```
 
 Import this file in the playground's config widget — channel count is
-inferred automatically from `weights.length`.
+inferred automatically from `weights.length`. Configs without an `mlp` block
+(everything exported before it existed, and anything hand-built in the
+playground) load exactly as before.
 
 ## Notes
 

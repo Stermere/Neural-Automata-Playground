@@ -1,8 +1,11 @@
+import { MlpConfig } from './MlpUtils';
+
 export type ShareableConfig = {
   weights: number[][][][];
   activationCode: string;
   normalize: boolean;
   computeKernel?: boolean;
+  mlp?: MlpConfig;
 };
 
 const HASH_PARAM = 'cfg';

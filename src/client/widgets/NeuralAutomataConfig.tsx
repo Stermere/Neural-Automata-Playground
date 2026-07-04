@@ -3,16 +3,24 @@ import styles from './styles/neuralAutomataConfig.module.css';
 import { DEFAULT_EXPORT_NAME, LOCAL_STORAGE_CONFIG_NAME } from '../constants/filenameConstants';
 import { ActivationVariableUtils, VariableValue } from '../utils/ActivationVariableUtils';
 import { ShareUtils } from '../utils/ShareUtils';
+import { MlpConfig, MlpUtils } from '../utils/MlpUtils';
 
 interface NeuralAutomataConfig {
   weights: number[][][][];
   activationCode: string;
   normalize: boolean;
   activationVariables: VariableValue[];
-  onLoad: (weights: number[][][][], activationCode: { code: string; normalize: boolean, computeKernel: boolean }) => void;
+  mlp: MlpConfig | null;
+  onLoad: (weights: number[][][][], activationCode: { code: string; normalize: boolean, computeKernel: boolean }, mlp?: MlpConfig | null) => void;
 }
 
-export default function NeuralAutomataConfig({ weights, activationCode, normalize, activationVariables, onLoad }: NeuralAutomataConfig) {
+// Configs written before the MLP existed simply lack the field; anything
+// malformed is dropped rather than fed to the shader
+function sanitizeMlp(mlp: unknown): MlpConfig | null {
+  return MlpUtils.isValid(mlp) ? mlp : null;
+}
+
+export default function NeuralAutomataConfig({ weights, activationCode, normalize, activationVariables, mlp, onLoad }: NeuralAutomataConfig) {
   const [filename, setFilename] = useState('');
   const [selected, setSelected] = useState('');
   const [savedFiles, setSavedFiles] = useState<string[]>([]);
@@ -42,6 +50,7 @@ export default function NeuralAutomataConfig({ weights, activationCode, normaliz
       activationCode: activationCodeUpdated,
       normalize,
       computeKernel,
+      ...(mlp ? { mlp } : {}),
     };
 
     localStorage.setItem(`${LOCAL_STORAGE_CONFIG_NAME}${writenFilename}`, JSON.stringify(data));
@@ -55,7 +64,7 @@ export default function NeuralAutomataConfig({ weights, activationCode, normaliz
 
     try {
       const data = JSON.parse(file);
-      onLoad(data.weights, { code: data.activationCode, normalize: data.normalize, computeKernel: data.computeKernel ?? true });
+      onLoad(data.weights, { code: data.activationCode, normalize: data.normalize, computeKernel: data.computeKernel ?? true }, sanitizeMlp(data.mlp));
       setFilename(name);
       setComputeKernel(data.computeKernel);
     } catch (err) {
@@ -80,7 +89,7 @@ export default function NeuralAutomataConfig({ weights, activationCode, normaliz
     reader.onload = () => {
       try {
         const data = JSON.parse(reader.result as string);
-        onLoad(data.weights, { code: data.activationCode, normalize: data.normalize, computeKernel: data.computeKernel ?? true });
+        onLoad(data.weights, { code: data.activationCode, normalize: data.normalize, computeKernel: data.computeKernel ?? true }, sanitizeMlp(data.mlp));
         setComputeKernel(data.computeKernel);
       } catch (err) {
         console.error('Failed to load weights:', err);
@@ -101,6 +110,7 @@ export default function NeuralAutomataConfig({ weights, activationCode, normaliz
         activationCode: activationCodeUpdated,
         normalize,
         computeKernel: String(computeKernel) !== 'false',
+        ...(mlp ? { mlp } : {}),
       });
       window.history.replaceState(null, '', url);
       await navigator.clipboard.writeText(url);
@@ -116,7 +126,7 @@ export default function NeuralAutomataConfig({ weights, activationCode, normaliz
   const handleExport = () => {
     const activationCodeUpdated = ActivationVariableUtils.updateDefaults(activationCode, activationVariables);
     const blob = new Blob(
-      [JSON.stringify({ weights, activationCode: activationCodeUpdated, normalize }, null, 2)],
+      [JSON.stringify({ weights, activationCode: activationCodeUpdated, normalize, ...(mlp ? { mlp } : {}) }, null, 2)],
       { type: 'application/json' }
     );
     const url = URL.createObjectURL(blob);
