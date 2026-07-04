@@ -2,6 +2,7 @@ import argparse
 import json
 import os
 import random
+import time
 from collections import deque
 
 import matplotlib.pyplot as plt
@@ -13,8 +14,8 @@ import torchvision.transforms as T
 from matplotlib.animation import FuncAnimation
 from PIL import Image
 
-downloads_path = os.path.join(os.path.expanduser("~"), "Downloads")
 default_image = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "trainingImages", "Emoji.png")
+checkpoints_root = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "checkpoints")
 
 
 # ======================================================
@@ -72,7 +73,7 @@ class CAModel(nn.Module):
             x, _ = self.step(x)
         return x
 
-    def exportToPlaygroundFormat(self, filepath="TrainedWeights.json"):
+    def exportToPlaygroundFormat(self, save_dir, filepath="TrainedWeights.json"):
         weights = self.conv.weight.detach().cpu().tolist()  # [out][in][5][5] — the shader's layout
         assert len(weights) == self.channels and len(weights[0]) == self.channels
 
@@ -84,7 +85,8 @@ class CAModel(nn.Module):
             "normalize": False
         }
 
-        save_path = os.path.join(downloads_path, filepath)
+        os.makedirs(save_dir, exist_ok=True)
+        save_path = os.path.join(save_dir, filepath)
         with open(save_path, "w") as f:
             json.dump(export_dict, f, indent=2)
 
@@ -195,8 +197,12 @@ def verify_shader_parity(channels=11, size=12, rule="tanh", delta=0.25):
 # ======================================================
 class CATrainer:
     def __init__(self, img_path, img_size=48, channels=11, pool_size=256,
-                 batch_size=8, lr=1e-3, delta=0.25, rule="tanh", margin=None, device=None):
+                 batch_size=8, lr=1e-3, delta=0.25, rule="tanh", margin=None, device=None,
+                 checkpoint_dir=None):
         self.device = device or ('cuda' if torch.cuda.is_available() else 'cpu')
+        image_name = os.path.splitext(os.path.basename(img_path))[0]
+        self.checkpoint_dir = checkpoint_dir or os.path.join(
+            checkpoints_root, f"{image_name}_{time.strftime('%Y%m%d-%H%M%S')}")
         self.size = img_size
         self.channels = channels
         self.pool_size = pool_size
@@ -210,16 +216,43 @@ class CATrainer:
         self.target = pad_to_canvas(self.target_content, img_size).unsqueeze(0).to(self.device)
         self.seed = make_seed(channels, img_size).to(self.device)
         self.pool = make_seed(channels, img_size, batch=pool_size).to(self.device)
+        self.dead_mask = self._make_dead_mask().to(self.device)
 
         self.optimizer = optim.Adam(self.model.parameters(), lr=lr, betas=(0.5, 0.95))
         self.scheduler = None  # created in train() once epochs is known
 
+    def _make_dead_mask(self, halo=6):
+        """1.0 in the margin far from the target content, 0.0 over the content
+        plus a small halo. Hidden channels get penalized in this dead zone:
+        the RGB loss can't see hidden activity leaking into the margin, and on
+        a canvas larger than the training grid that leak keeps propagating and
+        erupts into visible wormy structures. The halo leaves room for the
+        hidden boundary signals the pattern legitimately needs at its edge."""
+        mask = torch.ones(1, 1, self.size, self.size)
+        lo = max(0, self.margin - halo)
+        hi = min(self.size, self.size - self.margin + halo)
+        mask[:, :, lo:hi, lo:hi] = 0.0
+        return mask
+
+    def save_checkpoint(self, epoch, smooth_loss):
+        os.makedirs(self.checkpoint_dir, exist_ok=True)
+        stem = f"epoch_{epoch:06d}"
+        torch.save({
+            "epoch": epoch,
+            "loss": smooth_loss,
+            "model_state": self.model.state_dict(),
+            "optimizer_state": self.optimizer.state_dict(),
+        }, os.path.join(self.checkpoint_dir, f"{stem}.pt"))
+
+        self.model.exportToPlaygroundFormat(self.checkpoint_dir, filepath=f"{stem}.json")
+
     def train(self, epochs=4000, min_steps=48, max_steps=96,
-              overflow_weight=0.1, print_every=50):
+              overflow_weight=0.1, leak_weight=0.5, print_every=50, checkpoint_every=500):
         self.scheduler = optim.lr_scheduler.CosineAnnealingLR(
             self.optimizer, T_max=max(1, epochs), eta_min=1e-4)
         target_batch = self.target.expand(self.batch_size, -1, -1, -1)
         running = deque(maxlen=50)
+        epoch = 0
 
         try:
             for epoch in range(epochs):
@@ -242,8 +275,15 @@ class CATrainer:
                     x, ov = self.model.step(x)
                     overflow_total = overflow_total + ov
 
+                # hidden activity must be dead in the margin, not merely
+                # invisible — leaked hidden state grows without bound once the
+                # canvas is bigger than the training grid
+                hidden_leak = (x[:, 3:] ** 2 * self.dead_mask).sum() \
+                    / (self.dead_mask.sum() * (self.channels - 3) * x.shape[0])
+
                 loss = F.mse_loss(x[:, :3], target_batch) \
-                    + overflow_weight * overflow_total / steps
+                    + overflow_weight * overflow_total / steps \
+                    + leak_weight * hidden_leak
 
                 self.optimizer.zero_grad()
                 loss.backward()
@@ -261,10 +301,18 @@ class CATrainer:
 
                 if epoch % print_every == 0:
                     lr_now = self.optimizer.param_groups[0]['lr']
-                    print(f"[{epoch}] loss={loss.item():.5f} smooth={smooth:.5f} lr={lr_now:.2e}")
+                    print(f"[{epoch}] loss={loss.item():.5f} smooth={smooth:.5f} "
+                          f"leak={hidden_leak.item():.5f} lr={lr_now:.2e}")
+
+                if checkpoint_every and epoch > 0 and epoch % checkpoint_every == 0:
+                    self.save_checkpoint(epoch, smooth)
+                    print(f"Checkpoint saved: {self.checkpoint_dir}/epoch_{epoch:06d}.pt")
 
         except KeyboardInterrupt:
             print("Training interrupted. Keeping best weights.")
+
+        self.save_checkpoint(epoch, running[-1] if running else float('nan'))
+        print(f"Final checkpoint saved: {self.checkpoint_dir}/epoch_{epoch:06d}.pt")
 
     def evaluate_robustness(self, steps=600, extra_sizes=(0, 64, 192), radii=(0, 1, 2)):
         """Grow the pattern under conditions the browser will actually produce
@@ -273,10 +321,19 @@ class CATrainer:
         rgba8unorm texture does. Catches a fragile kernel before you export
         and deploy it, instead of finding out on the website."""
         content = self.target_content.detach().cpu()
-        print("Robustness check (mse to target; ~0.01 or under reproduces cleanly):")
+        content_size = content.shape[-1]
+        print("Robustness check (mse to target; ~0.01 or under reproduces cleanly;\n"
+              "leak is max hidden activity outside the pattern - near 0 or the\n"
+              "margin sprouts worm structures on a big canvas):")
         for extra in extra_sizes:
             canvas_size = self.size + extra
             tgt = pad_to_canvas(content, canvas_size)
+            m = (canvas_size - content_size) // 2
+            halo = 6
+            dead = torch.ones(canvas_size, canvas_size)
+            dead[max(0, m - halo):m + content_size + halo,
+                 max(0, m - halo):m + content_size + halo] = 0.0
+            dead = dead.to(self.device)
             for radius in radii:
                 seed = make_seed(self.channels, canvas_size, radius=radius).to(self.device)
                 with torch.no_grad():
@@ -284,8 +341,9 @@ class CATrainer:
                     for _ in range(steps):
                         x, _ = self.model.step(x)
                         x = torch.cat([torch.round(x[:, :3] * 255) / 255, x[:, 3:]], dim=1)
+                    leak = (x[0, 3:] * dead).abs().max().item()
                 mse = F.mse_loss(x[0, :3].cpu(), tgt).item()
-                print(f"  canvas={canvas_size:4d}px seed_radius={radius}: mse={mse:.4f}")
+                print(f"  canvas={canvas_size:4d}px seed_radius={radius}: mse={mse:.4f} leak={leak:.4f}")
 
     def animate(self, steps=400, from_seed=True, quantize=False,
                 show_hidden=False, interval=30):
@@ -357,21 +415,33 @@ if __name__ == "__main__":
                          help="blank margin (px) around the target inside the training canvas, "
                               "so growth doesn't rely on wraparound at one exact canvas size; "
                               "default scales with --size (~15%% per side), use 0 for the old edge-to-edge behavior")
+    parser.add_argument("--leak-weight", type=float, default=0.5,
+                        help="penalty on hidden-channel activity in the dead margin; "
+                             "keeps the pattern from sprouting worm structures into empty "
+                             "space on canvases larger than the training grid")
+    parser.add_argument("--checkpoint-every", type=int, default=500,
+                        help="save a checkpoint every N epochs (0 to disable periodic saves)")
+    parser.add_argument("--checkpoint-dir", default=None,
+                         help="directory for this run's checkpoints; "
+                              "defaults to a new timestamped folder under kernalPreTraining/checkpoints")
     parser.add_argument("-y", "--export", action="store_true", help="export without prompting")
     args = parser.parse_args()
 
     verify_shader_parity(channels=args.channels, rule=args.rule, delta=args.delta)
 
     trainer = CATrainer(args.image, img_size=args.size, channels=args.channels,
-                        lr=args.lr, rule=args.rule, delta=args.delta, margin=args.margin)
+                        lr=args.lr, rule=args.rule, delta=args.delta, margin=args.margin,
+                        checkpoint_dir=args.checkpoint_dir)
     print(f"Training on {args.image} ({args.size}px, margin={trainer.margin}px, "
           f"{args.channels} channels, device={trainer.device})")
+    print(f"Checkpoints: {trainer.checkpoint_dir}")
 
-    trainer.train(epochs=args.epochs)
+    trainer.train(epochs=args.epochs, leak_weight=args.leak_weight,
+                  checkpoint_every=args.checkpoint_every)
     trainer.model.loadBest()
     trainer.evaluate_robustness()
 
     if args.export or input("Save pattern? ").strip().lower() == 'y':
-        trainer.model.exportToPlaygroundFormat()
+        trainer.model.exportToPlaygroundFormat(trainer.checkpoint_dir)
 
     trainer.animate(steps=args.steps, quantize=args.quantize, show_hidden=args.show_hidden)
