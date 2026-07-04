@@ -106,19 +106,46 @@ class CAModel(nn.Module):
 # ======================================================
 # Seed / target helpers
 # ======================================================
-def make_seed(channels, size, batch=1):
-    """All channels 1.0 at the center pixel — matches the browser brush."""
+def make_seed(channels, size, batch=1, radius=0, jitter=0):
+    """All channels 1.0 in a small blob near the center.
+    radius=0, jitter=0 (the default) is a single pixel, matching the browser's
+    smallest brush. Training reseeds with randomized radius/jitter so the
+    model tolerates a real brush's imprecision instead of requiring a
+    mathematically perfect dab."""
     seed = torch.zeros(batch, channels, size, size)
-    seed[:, :, size // 2, size // 2] = 1.0
+    cy = size // 2 + (random.randint(-jitter, jitter) if jitter else 0)
+    cx = size // 2 + (random.randint(-jitter, jitter) if jitter else 0)
+    y0, y1 = max(0, cy - radius), min(size, cy + radius + 1)
+    x0, x1 = max(0, cx - radius), min(size, cx + radius + 1)
+    seed[:, :, y0:y1, x0:x1] = 1.0
     return seed
 
 
-def load_target(path, size):
+def load_target_content(path, content_size):
     img = Image.open(path).convert("RGBA")
     black_bg = Image.new("RGBA", img.size, (0, 0, 0, 255))
     img = Image.alpha_composite(black_bg, img).convert("RGB")  # transparency -> black, the CA's zero fixed point
-    transform = T.Compose([T.Resize((size, size)), T.ToTensor()])
-    return transform(img).unsqueeze(0)  # [1, 3, H, W]
+    transform = T.Compose([T.Resize((content_size, content_size)), T.ToTensor()])
+    return transform(img)  # [3, content_size, content_size]
+
+
+def pad_to_canvas(content, canvas_size):
+    """Centers `content` in a black canvas of canvas_size, adding a dead-cell
+    margin. Training against a padded canvas keeps growth away from the
+    training border, so the kernel doesn't learn to rely on wraparound at one
+    exact canvas size — that's what lets it generalize to a bigger canvas."""
+    content_size = content.shape[-1]
+    if content_size == canvas_size:
+        return content
+    margin = (canvas_size - content_size) // 2
+    canvas = torch.zeros(3, canvas_size, canvas_size)
+    canvas[:, margin:margin + content_size, margin:margin + content_size] = content
+    return canvas
+
+
+def load_target(path, size, margin=0):
+    content = load_target_content(path, size - 2 * margin)
+    return pad_to_canvas(content, size).unsqueeze(0)  # [1, 3, H, W]
 
 
 # ======================================================
@@ -168,15 +195,19 @@ def verify_shader_parity(channels=11, size=12, rule="tanh", delta=0.25):
 # ======================================================
 class CATrainer:
     def __init__(self, img_path, img_size=48, channels=11, pool_size=256,
-                 batch_size=8, lr=1e-3, delta=0.25, rule="tanh", device=None):
+                 batch_size=8, lr=1e-3, delta=0.25, rule="tanh", margin=None, device=None):
         self.device = device or ('cuda' if torch.cuda.is_available() else 'cpu')
         self.size = img_size
         self.channels = channels
         self.pool_size = pool_size
         self.batch_size = batch_size
+        # Default margin scales with grid size so the target never touches
+        # the training canvas border (~15% dead space per side).
+        self.margin = margin if margin is not None else max(4, round(img_size * 0.15))
 
         self.model = CAModel(channels=channels, delta=delta, rule=rule).to(self.device)
-        self.target = load_target(img_path, img_size).to(self.device)
+        self.target_content = load_target_content(img_path, img_size - 2 * self.margin).to(self.device)
+        self.target = pad_to_canvas(self.target_content, img_size).unsqueeze(0).to(self.device)
         self.seed = make_seed(channels, img_size).to(self.device)
         self.pool = make_seed(channels, img_size, batch=pool_size).to(self.device)
 
@@ -195,10 +226,15 @@ class CATrainer:
                 idx = torch.randint(0, self.pool_size, (self.batch_size,))
                 x = self.pool[idx]
 
-                # reseed the worst-looking sample so growth from seed keeps training
+                # reseed the worst-looking sample so growth from seed keeps training;
+                # randomize the seed's radius/jitter so the model learns to grow
+                # correctly from an imprecise brush dab, not just a perfect pixel
                 with torch.no_grad():
                     per_sample = ((x[:, :3] - target_batch) ** 2).mean(dim=(1, 2, 3))
-                x[per_sample.argmax()] = self.seed[0]
+                radius = random.choices([0, 1, 2], weights=[0.6, 0.3, 0.1])[0]
+                jitter = random.randint(0, 3)
+                reseed = make_seed(self.channels, self.size, radius=radius, jitter=jitter).to(self.device)
+                x[per_sample.argmax()] = reseed[0]
 
                 steps = random.randint(min_steps, max_steps)
                 overflow_total = x.new_zeros(())
@@ -229,6 +265,27 @@ class CATrainer:
 
         except KeyboardInterrupt:
             print("Training interrupted. Keeping best weights.")
+
+    def evaluate_robustness(self, steps=600, extra_sizes=(0, 64, 192), radii=(0, 1, 2)):
+        """Grow the pattern under conditions the browser will actually produce
+        — canvases bigger than training, and seed dabs from a 1px pixel up to
+        a few px wide — quantizing visible channels every step like the
+        rgba8unorm texture does. Catches a fragile kernel before you export
+        and deploy it, instead of finding out on the website."""
+        content = self.target_content.detach().cpu()
+        print("Robustness check (mse to target; ~0.01 or under reproduces cleanly):")
+        for extra in extra_sizes:
+            canvas_size = self.size + extra
+            tgt = pad_to_canvas(content, canvas_size)
+            for radius in radii:
+                seed = make_seed(self.channels, canvas_size, radius=radius).to(self.device)
+                with torch.no_grad():
+                    x = seed
+                    for _ in range(steps):
+                        x, _ = self.model.step(x)
+                        x = torch.cat([torch.round(x[:, :3] * 255) / 255, x[:, 3:]], dim=1)
+                mse = F.mse_loss(x[0, :3].cpu(), tgt).item()
+                print(f"  canvas={canvas_size:4d}px seed_radius={radius}: mse={mse:.4f}")
 
     def animate(self, steps=400, from_seed=True, quantize=False,
                 show_hidden=False, interval=30):
@@ -287,7 +344,7 @@ class CATrainer:
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Pre-train an NCA kernel for the WebGPU playground")
     parser.add_argument("--image", default=default_image)
-    parser.add_argument("--size", type=int, default=48)
+    parser.add_argument("--size", type=int, default=32)
     parser.add_argument("--epochs", type=int, default=4000)
     parser.add_argument("--channels", type=int, default=11)
     parser.add_argument("--lr", type=float, default=1e-3)
@@ -296,17 +353,23 @@ if __name__ == "__main__":
     parser.add_argument("--steps", type=int, default=400, help="animation steps")
     parser.add_argument("--quantize", action="store_true", help="emulate 8-bit visible channels in animation")
     parser.add_argument("--show-hidden", action="store_true", help="also animate hidden channels")
+    parser.add_argument("--margin", type=int, default=None,
+                         help="blank margin (px) around the target inside the training canvas, "
+                              "so growth doesn't rely on wraparound at one exact canvas size; "
+                              "default scales with --size (~15%% per side), use 0 for the old edge-to-edge behavior")
     parser.add_argument("-y", "--export", action="store_true", help="export without prompting")
     args = parser.parse_args()
 
     verify_shader_parity(channels=args.channels, rule=args.rule, delta=args.delta)
 
     trainer = CATrainer(args.image, img_size=args.size, channels=args.channels,
-                        lr=args.lr, rule=args.rule, delta=args.delta)
-    print(f"Training on {args.image} ({args.size}px, {args.channels} channels, device={trainer.device})")
+                        lr=args.lr, rule=args.rule, delta=args.delta, margin=args.margin)
+    print(f"Training on {args.image} ({args.size}px, margin={trainer.margin}px, "
+          f"{args.channels} channels, device={trainer.device})")
 
     trainer.train(epochs=args.epochs)
     trainer.model.loadBest()
+    trainer.evaluate_robustness()
 
     if args.export or input("Save pattern? ").strip().lower() == 'y':
         trainer.model.exportToPlaygroundFormat()

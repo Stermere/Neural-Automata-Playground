@@ -290,7 +290,7 @@ export class WebGPUNeuralAutomataController {
   }
 
   setBrushSize(size: number): void {
-    this.brushRadius = size;
+    this.brushRadius = Math.max(0, size - 1);
   }
 
   togglePaused(paused: boolean): void {

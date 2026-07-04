@@ -43,6 +43,7 @@ Without `-y` you'll be prompted `Save pattern? ` after training finishes.
 | `--steps` | `400` | Number of steps to animate after training |
 | `--quantize` | off | Round visible channels to 8-bit each animation step, emulating the browser's texture format |
 | `--show-hidden` | off | Also animate the 8 hidden memory channels as grayscale panels |
+| `--margin` | ~15% of `--size` | Blank border (px) around the target inside the training canvas, so growth learns to stay clear of the training edge instead of relying on wraparound at that one exact size — this is what lets the kernel reproduce correctly on a browser canvas of a different size. Use `0` for the old edge-to-edge behavior |
 | `-y`, `--export` | off | Export without the interactive prompt |
 
 Examples:
@@ -75,10 +76,19 @@ inferred automatically from `weights.length`.
 
 ## Notes
 
-- Training seeds are a single center pixel with all channels set to 1.0,
-  matching the browser's brush-paint behavior on a cleared canvas. A larger
-  brush dab is out-of-distribution, so use the smallest brush when testing
-  an imported kernel in-browser.
+- Training reseeds with a randomized dab (a 1-5px blob, jittered a few
+  pixels off-center) so the kernel tolerates the imprecision of a real
+  brush click, not just a mathematically perfect single pixel. The default
+  `--margin` keeps the target away from the training canvas edge so growth
+  doesn't depend on wraparound at one exact canvas size. Together these are
+  what let a trained kernel reproduce correctly on a browser canvas that's a
+  different size than `--size`, painted with a normal (not pixel-precise)
+  brush click.
+- After training, a robustness check grows the pattern at several canvas
+  sizes and seed radii and prints the MSE to the target for each — check
+  this before exporting. If a config still looks fragile there, increase
+  `--margin` or lower `--delta` (large deltas make each step's update bigger,
+  which amplifies any mismatch between training and deployment conditions).
 - If `linear` plateaus at a flat blob, `tanh` is more expressive and is the
   default for that reason.
 - Interrupting training with Ctrl+C skips straight to loading the best
