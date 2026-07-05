@@ -38,7 +38,7 @@ from trainer import CATrainer
 TRAINER_KEYS = {"size": "img_size", "channels": "channels", "pool_size": "pool_size",
                 "batch_size": "batch_size", "lr": "lr", "delta": "delta", "rule": "rule",
                 "margin": "margin", "fire_rate": "fire_rate", "fg_weight": "fg_weight",
-                "mlp_hidden": "mlp_hidden"}
+                "mlp_hidden": "mlp_hidden", "mlp_state_input": "mlp_state_input"}
 # sweepable names passed straight to CATrainer.train
 TRAIN_KEYS = ("epochs", "min_steps", "max_steps", "overflow_weight", "leak_weight",
               "edge_weight", "damage_n", "grad_ckpt_steps")
@@ -126,8 +126,10 @@ def main():
         for fire_rate in set(grid.get("fire_rate", [0.5])):
             for mlp_hidden in set(grid.get("mlp_hidden", [args.mlp_hidden])):
                 if mlp_hidden:
-                    verify_shader_parity_mlp(channels=args.channels, rule=rule,
-                                             fire_rate=fire_rate)
+                    for state_input in set(grid.get("mlp_state_input", [1])):
+                        verify_shader_parity_mlp(channels=args.channels, rule=rule,
+                                                 fire_rate=fire_rate,
+                                                 state_input=bool(state_input))
                 else:
                     verify_shader_parity(channels=args.channels, rule=rule,
                                          fire_rate=fire_rate)

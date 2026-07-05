@@ -35,11 +35,15 @@ if __name__ == "__main__":
                         help="hidden units of the per-cell MLP inserted between the 5x5 "
                              "conv outputs and the update rule (conv -> ReLU layer -> "
                              "output layer); 0 trains the legacy conv-only kernel")
+    parser.add_argument("--mlp-no-state-input", action="store_true",
+                        help="drop the cell's own raw state from the MLP inputs, leaving "
+                             "only the conv outputs (the pre-state-input architecture, "
+                             "kept for A/B comparison)")
     parser.add_argument("--steps", type=int, default=400, help="animation steps")
     parser.add_argument("--min-steps", type=int, default=None,
                         help="min rollout steps per training epoch; default = --size")
     parser.add_argument("--max-steps", type=int, default=None,
-                        help="max rollout steps per training epoch; default = 2x --size")
+                        help="max rollout steps per training epoch; default = 3x --size")
     parser.add_argument("--quantize", action="store_true", help="emulate 8-bit visible channels in animation")
     parser.add_argument("--show-hidden", action="store_true", help="also animate hidden channels")
     parser.add_argument("--margin", type=int, default=None,
@@ -80,7 +84,8 @@ if __name__ == "__main__":
 
     if args.mlp_hidden:
         verify_shader_parity_mlp(channels=args.channels, rule=args.rule, delta=args.delta,
-                                 fire_rate=args.fire_rate)
+                                 fire_rate=args.fire_rate,
+                                 state_input=not args.mlp_no_state_input)
     else:
         verify_shader_parity(channels=args.channels, rule=args.rule, delta=args.delta,
                              fire_rate=args.fire_rate)
@@ -89,8 +94,12 @@ if __name__ == "__main__":
                         pool_size=args.pool_size, batch_size=args.batch_size,
                         lr=args.lr, rule=args.rule, delta=args.delta, margin=args.margin,
                         fire_rate=args.fire_rate, fg_weight=args.fg_weight,
-                        mlp_hidden=args.mlp_hidden, checkpoint_dir=args.checkpoint_dir)
-    arch = f"mlp_hidden={args.mlp_hidden}" if args.mlp_hidden else "legacy 5x5 conv"
+                        mlp_hidden=args.mlp_hidden,
+                        mlp_state_input=not args.mlp_no_state_input,
+                        checkpoint_dir=args.checkpoint_dir)
+    arch = (f"mlp_hidden={args.mlp_hidden}"
+            f"{'' if args.mlp_no_state_input else '+state'}"
+            if args.mlp_hidden else "legacy 5x5 conv")
     print(f"Training on {args.image} ({args.size}px, margin={trainer.margin}px, "
           f"{args.channels} channels, {arch}, pool={args.pool_size}, "
           f"batch={args.batch_size}, device={trainer.device})")

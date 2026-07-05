@@ -15,9 +15,12 @@ const KERNEL_AREA: u32 = u32(KERNEL_SIZE * KERNEL_SIZE);
 // before the activation, giving the update rule a genuine nonlinearity.
 @useMlpFlag
 const MLP_HIDDEN: u32 = @mlpHiddenu;
+// MLP input width: the CHANNEL_COUNT conv results, doubled when the kernel
+// was trained with the cell's own raw state as extra MLP inputs (stateInput)
+const MLP_IN: u32 = @mlpInu;
 // Offsets into the flat mlpWeights buffer:
-// [w1: MLP_HIDDEN x CHANNEL_COUNT][b1: MLP_HIDDEN][w2: CHANNEL_COUNT x MLP_HIDDEN][b2: CHANNEL_COUNT]
-const MLP_B1_OFFSET: u32 = MLP_HIDDEN * CHANNEL_COUNT;
+// [w1: MLP_HIDDEN x MLP_IN][b1: MLP_HIDDEN][w2: CHANNEL_COUNT x MLP_HIDDEN][b2: CHANNEL_COUNT]
+const MLP_B1_OFFSET: u32 = MLP_HIDDEN * MLP_IN;
 const MLP_W2_OFFSET: u32 = MLP_B1_OFFSET + MLP_HIDDEN;
 const MLP_B2_OFFSET: u32 = MLP_W2_OFFSET + CHANNEL_COUNT * MLP_HIDDEN;
 
@@ -145,7 +148,15 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     for (var j: u32 = 0u; j < MLP_HIDDEN; j++) {
       var acc: f32 = mlpWeights[MLP_B1_OFFSET + j];
       for (var ch: u32 = 0u; ch < CHANNEL_COUNT; ch++) {
-        acc += mlpWeights[j * CHANNEL_COUNT + ch] * sums[ch];
+        acc += mlpWeights[j * MLP_IN + ch] * sums[ch];
+      }
+      // stateInput kernels: the cell's own raw state follows the conv
+      // results as a second block of w1 columns (const condition, so the
+      // branch compiles out for conv-only-input kernels)
+      if (MLP_IN > CHANNEL_COUNT) {
+        for (var ch: u32 = 0u; ch < CHANNEL_COUNT; ch++) {
+          acc += mlpWeights[j * MLP_IN + CHANNEL_COUNT + ch] * activationContext.cellState[ch];
+        }
       }
       hiddenAct[j] = max(acc, 0.0);
     }

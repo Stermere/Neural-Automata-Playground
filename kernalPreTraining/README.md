@@ -15,6 +15,13 @@ and the activation. The conv weights themselves stay a normal part of the
 config, so trained patterns remain editable in the playground's weight editor.
 `--mlp-hidden 0` trains the legacy conv-only kernel.
 
+The MLP also sees the cell's own raw state, concatenated after the conv
+results (the Growing-NCA identity-filter idea: without it the conv must spend
+capacity approximating identity kernels just to pass the cell's state
+through). `--mlp-no-state-input` trains the older conv-outputs-only MLP for
+A/B comparison; both variants load in the playground, which infers the input
+width from `w1`.
+
 Beyond that, the kernel carries a per-channel bias (conv-only; the MLP's
 biases live in the `mlp` block), a per-channel learned update rate, and
 stochastic updates (each cell applies its update with probability
@@ -69,6 +76,7 @@ Without `-y` you'll be prompted `Save pattern? ` after training finishes.
 | `--epochs` | `4000` | Training iterations |
 | `--channels` | `11` | Total channels (3 visible + hidden); max the playground supports is 16 |
 | `--mlp-hidden` | `128` | Hidden units of the per-cell MLP between the conv outputs and the update rule; `0` trains the legacy conv-only kernel |
+| `--mlp-no-state-input` | off | Drop the cell's own raw state from the MLP inputs (conv outputs only — the pre-state-input architecture, kept for A/B comparison) |
 | `--pool-size` | `256` | Number of persistent samples kept in the training pool |
 | `--batch-size` | `8` | Samples drawn from the pool per training step |
 | `--lr` | `1e-3` | Adam learning rate |
@@ -118,8 +126,9 @@ kernalPreTraining/.venv/Scripts/python.exe kernalPreTraining/src/grid_search.py 
 ```
 
 Searchable: `size, channels, pool-size, batch-size, lr, delta, rule, margin,
-fire-rate, fg-weight, mlp-hidden, epochs, min-steps, max-steps,
-overflow-weight, leak-weight, edge-weight, damage-n, grad-ckpt-steps`.
+fire-rate, fg-weight, mlp-hidden, mlp-state-input, epochs, min-steps,
+max-steps, overflow-weight, leak-weight, edge-weight, damage-n,
+grad-ckpt-steps`.
 
 Each run gets its own subfolder (final checkpoint + `TrainedWeights.json`)
 under a timestamped `gridsearch_*` folder; `results.json` is rewritten after
@@ -136,10 +145,13 @@ Exports `TrainedWeights.json` into the run's checkpoint folder:
 {
   "weights": [ /* [outChannel][inChannel][5][5] nested array */ ],
   // the per-cell MLP the shader applies to the conv results, flattened
-  // into a storage buffer as [w1][b1][w2][b2]; absent for --mlp-hidden 0
+  // into a storage buffer as [w1][b1][w2][b2]; absent for --mlp-hidden 0.
+  // With stateInput, w1's rows are 2*channels wide: conv results first,
+  // then the cell's raw state (the playground keys off the row width)
   "mlp": {
     "hiddenDim": 128,
-    "w1": [ /* [hiddenDim][channels] */ ],
+    "stateInput": true,
+    "w1": [ /* [hiddenDim][channels or 2*channels] */ ],
     "b1": [ /* [hiddenDim] */ ],
     "w2": [ /* [channels][hiddenDim] */ ],
     "b2": [ /* [channels] */ ]

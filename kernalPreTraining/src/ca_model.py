@@ -216,14 +216,21 @@ class CAModel(_CAModelBase):
 # ======================================================
 class MLPCAModel(_CAModelBase):
     def __init__(self, channels=11, hidden_dim=128, kernel_size=5, delta=0.25,
-                 rule="tanh", fire_rate=0.5):
+                 rule="tanh", fire_rate=0.5, state_input=True):
         super().__init__(channels, delta, rule, fire_rate)
         self.hidden_dim = hidden_dim
+        # state_input feeds the cell's own raw state to the MLP alongside the
+        # conv outputs (the Growing-NCA identity-filter idea): without it the
+        # conv must spend capacity approximating identity kernels just so the
+        # MLP can see the state it is updating. The mode is inferred back from
+        # w1's input width everywhere (checkpoints, playground), so old
+        # conv-only-input kernels keep loading.
+        self.state_input = state_input
         # No conv bias: the shader's conv path is a raw weighted sum, and a
         # per-channel bias before w1 is absorbed exactly by b1 anyway
         self.conv = nn.Conv2d(channels, channels, kernel_size,
                               padding=kernel_size // 2, padding_mode='circular', bias=False)
-        self.w1 = nn.Conv2d(channels, hidden_dim, 1)
+        self.w1 = nn.Conv2d(channels * (2 if state_input else 1), hidden_dim, 1)
         self.w2 = nn.Conv2d(hidden_dim, channels, 1)
         # zero-init the output layer so the CA starts as the identity map
         # (the Growing-NCA trick: early rollouts don't explode); the conv and
@@ -232,7 +239,12 @@ class MLPCAModel(_CAModelBase):
         nn.init.zeros_(self.w2.bias)
 
     def _conv_out(self, x):
-        return self.w2(F.relu(self.w1(self.conv(x))))
+        h = self.conv(x)
+        if self.state_input:
+            # conv results first, then the raw state — the shader's
+            # mlpWeights layout and the export both assume this order
+            h = torch.cat([h, x], dim=1)
+        return self.w2(F.relu(self.w1(h)))
 
     def exportToPlaygroundFormat(self, save_dir, filepath="TrainedWeights.json"):
         weights = self.conv.weight.detach().cpu().tolist()  # [out][in][5][5] — the shader's layout
@@ -242,8 +254,11 @@ class MLPCAModel(_CAModelBase):
             "weights": weights,
             # Flattened by the playground into the shader's mlpWeights buffer
             # as [w1][b1][w2][b2]; w2's bias ships here, so NCA_BIAS is zero.
+            # stateInput is informational — the playground infers the MLP
+            # input width from w1's row length.
             "mlp": {
                 "hiddenDim": self.hidden_dim,
+                "stateInput": self.state_input,
                 "w1": self.w1.weight.detach().cpu().squeeze(-1).squeeze(-1).tolist(),
                 "b1": self.w1.bias.detach().cpu().tolist(),
                 "w2": self.w2.weight.detach().cpu().squeeze(-1).squeeze(-1).tolist(),
@@ -265,8 +280,12 @@ def model_from_checkpoint(checkpoint, rule=None, fire_rate=None):
     rule = rule if rule is not None else config.get("rule", "tanh")
     fire_rate = fire_rate if fire_rate is not None else config.get("fire_rate", 0.5)
     if "w2.weight" in state:
-        model = MLPCAModel(channels=state["w2.weight"].shape[0],
+        channels = state["w2.weight"].shape[0]
+        model = MLPCAModel(channels=channels,
                            hidden_dim=state["w1.weight"].shape[0],
+                           # w1 twice as wide as the channel count means the
+                           # cell state was concatenated to the MLP input
+                           state_input=state["w1.weight"].shape[1] == 2 * channels,
                            rule=rule, fire_rate=fire_rate)
     else:
         model = CAModel(channels=state["conv.weight"].shape[0],

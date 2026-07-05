@@ -477,6 +477,9 @@ export class WebGPUNeuralAutomataController {
     ).replace(
       '@mlpHidden',
       `${this.mlp?.hiddenDim ?? 1}`,
+    ).replace(
+      '@mlpIn',
+      `${this.mlp ? MlpUtils.inputDim(this.mlp) : 1}`,
     );
   }
 

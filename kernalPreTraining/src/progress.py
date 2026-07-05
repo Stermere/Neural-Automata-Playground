@@ -1,29 +1,16 @@
-"""Live training dashboard: a plotext loss curve plus a stats table, redrawn
-in place with rich.Live instead of scrolling the terminal with one print per
-logging step."""
-import sys
+"""Live training dashboard: a matplotlib window with a loss-curve plot and a
+stats readout, updated in place as training progresses."""
 import time
 
-import plotext as plt
-from rich.console import Console, Group
-from rich.live import Live
-from rich.panel import Panel
-from rich.table import Table
-from rich.text import Text
+import matplotlib.pyplot as plt
 
-# The chart uses Unicode braille/box characters; when stdout is redirected or
-# the console is legacy Windows, its encoding can be cp1252 and printing the
-# dashboard raises UnicodeEncodeError. Degrade to '?' instead of crashing.
-if hasattr(sys.stdout, "reconfigure"):
-    sys.stdout.reconfigure(errors="replace")
-
-_MAX_POINTS = 400  # halve resolution past this so long runs stay responsive
+_MAX_EPOCHS = 100000  # drop points older than this many epochs so the chart stays windowed to recent training
 # (metric key, display label, plot color) - key is what callers pass to update()
 _SERIES = (
     ("loss", "loss (total)", "magenta"),
     ("smooth", "loss (smoothed)", "cyan"),
     ("rgb", "rgb MSE", "green"),
-    ("edge", "edge MSE", "yellow"),
+    ("edge", "edge MSE", "goldenrod"),
     ("overflow", "overflow", "blue"),
     ("leak", "hidden leak MSE", "red"),
 )
@@ -40,33 +27,50 @@ class TrainingMonitor:
                                    overflow=..., leak=..., lr=..., best=...)
             monitor.note("done")
 
-    note() prints a line above the live region (for one-off messages like
-    checkpoint saves) instead of disrupting the chart.
+    note() prints a status line to the console (checkpoint saves, interrupts)
+    without disturbing the chart window.
     """
 
-    def __init__(self, total_epochs, title="training", console=None):
+    def __init__(self, total_epochs, title="training"):
         self.total_epochs = total_epochs
         self.title = title
-        self.console = console or Console()
         self.epochs = []
         self.history = {key: [] for key, _, _ in _SERIES}
         self.start_time = None
         self._epoch = 0
         self._lr = None
         self._best = None
-        self._live = Live(self._render(), console=self.console,
-                          refresh_per_second=4, transient=False)
+
+        plt.ion()
+        self.fig, (self.ax_chart, self.ax_stats) = plt.subplots(
+            1, 2, figsize=(13, 7.5), gridspec_kw={"width_ratios": [3, 1]},
+            constrained_layout=True)
+        manager = getattr(self.fig.canvas, "manager", None)
+        if manager is not None:
+            manager.set_window_title(title)
+        self.ax_chart.set_xlabel("epoch")
+        self.ax_chart.set_ylabel("value")
+        self.ax_chart.grid(True, alpha=0.3)
+        self._lines = {
+            key: self.ax_chart.plot([], [], label=label, color=color, linewidth=1.2)[0]
+            for key, label, color in _SERIES
+        }
+        self.ax_stats.axis("off")
+        self._stats_text = self.ax_stats.text(
+            0.0, 1.0, "", va="top", ha="left", family="monospace", fontsize=10,
+            transform=self.ax_stats.transAxes)
 
     def __enter__(self):
         self.start_time = time.time()
-        self._live.__enter__()
+        plt.show(block=False)
         return self
 
     def __exit__(self, *exc_info):
-        self._live.__exit__(*exc_info)
+        plt.ioff()
+        return False
 
     def note(self, message):
-        self._live.console.print(message)
+        print(message)
 
     def update(self, epoch, lr=None, best=None, **metrics):
         self._epoch = epoch
@@ -75,53 +79,53 @@ class TrainingMonitor:
         self.epochs.append(epoch)
         for key, _, _ in _SERIES:
             self.history[key].append(metrics.get(key))
-        if len(self.epochs) > _MAX_POINTS:
-            self.epochs = self.epochs[::2]
+        cutoff = epoch - _MAX_EPOCHS
+        drop = 0
+        while drop < len(self.epochs) and self.epochs[drop] <= cutoff:
+            drop += 1
+        if drop:
+            self.epochs = self.epochs[drop:]
             for name in self.history:
-                self.history[name] = self.history[name][::2]
-        self._live.update(self._render(), refresh=True)
+                self.history[name] = self.history[name][drop:]
 
-    def _chart(self):
-        if len(self.epochs) < 2:
-            return Text("(warming up...)")
-        plot_width = max(40, self.console.width - 4)
-        plt.clf()
-        plt.plotsize(plot_width, 18)
-        plt.theme("pro")
-        plt.xlabel("epoch")
-        for key, label, color in _SERIES:
+        for key, _, _ in _SERIES:
             values = self.history[key]
-            if any(v is not None for v in values):
-                xs = [e for e, v in zip(self.epochs, values) if v is not None]
-                ys = [v for v in values if v is not None]
-                plt.plot(xs, ys, label=label, color=color)
-        return Text.from_ansi(plt.build())
+            xs = [e for e, v in zip(self.epochs, values) if v is not None]
+            ys = [v for v in values if v is not None]
+            self._lines[key].set_data(xs, ys)
+            self._lines[key].set_visible(bool(ys))
 
-    def _stats(self):
-        table = Table.grid(padding=(0, 2))
-        table.add_column(justify="right", style="bold")
-        table.add_column()
-        table.add_row("epoch", f"{self._epoch}/{self.total_epochs}")
+        active = [line for line in self._lines.values() if line.get_visible()]
+        if active:
+            self.ax_chart.legend(handles=active, loc="upper right", fontsize=8)
+        self.ax_chart.relim()
+        self.ax_chart.autoscale_view()
+        self.ax_chart.set_title(f"{self.title} — epoch {epoch}/{self.total_epochs}")
+
+        self._stats_text.set_text(self._stats_str())
+
+        self.fig.canvas.draw_idle()
+        self.fig.canvas.flush_events()
+
+    def _stats_str(self):
+        lines = [f"{'epoch':<18} {self._epoch}/{self.total_epochs}"]
         for key, label, _ in _SERIES:
             values = self.history[key]
             if values and values[-1] is not None:
-                table.add_row(label, f"{values[-1]:.5f}")
+                lines.append(f"{label:<18} {values[-1]:.5f}")
         if self._best is not None:
-            table.add_row("best (smoothed)", f"{self._best:.5f}")
+            lines.append(f"{'best (smoothed)':<18} {self._best:.5f}")
         if self._lr is not None:
-            table.add_row("lr", f"{self._lr:.2e}")
+            lines.append(f"{'lr':<18} {self._lr:.2e}")
         if self.start_time is not None:
             elapsed = time.time() - self.start_time
             rate = self._epoch / elapsed if elapsed > 0 and self._epoch > 0 else 0
             remaining = self.total_epochs - self._epoch
             eta = remaining / rate if rate > 0 else None
-            table.add_row("elapsed", _format_duration(elapsed))
+            lines.append(f"{'elapsed':<18} {_format_duration(elapsed)}")
             if eta is not None:
-                table.add_row("eta", _format_duration(eta))
-        return table
-
-    def _render(self):
-        return Panel(Group(self._chart(), self._stats()), title=self.title)
+                lines.append(f"{'eta':<18} {_format_duration(eta)}")
+        return "\n".join(lines)
 
 
 def _format_duration(seconds):

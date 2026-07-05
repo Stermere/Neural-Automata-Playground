@@ -19,11 +19,38 @@ from progress import TrainingMonitor
 from targets import load_target_content, make_seed, pad_to_canvas
 
 
+def _mse(diff):
+    return diff ** 2
+
+
+def _l1(diff):
+    return diff.abs()
+
+
+def _huber(diff, delta=0.1):
+    """Quadratic near zero, linear past delta - splits the difference between
+    mse's smoothness and l1's robustness to the occasional bad rollout."""
+    abs_diff = diff.abs()
+    quadratic = 0.5 * diff ** 2 / delta
+    linear = abs_diff - 0.5 * delta
+    return torch.where(abs_diff <= delta, quadratic, linear)
+
+
+# distance functions for the rgb/edge reconstruction terms, keyed by the
+# loss_fn= name train() accepts - swap to experiment without touching the
+# rest of the loss recipe (weighting, edge term, overflow/leak penalties)
+LOSS_FUNCTIONS = {
+    "mse": _mse,
+    "l1": _l1,
+    "huber": _huber,
+}
+
+
 class CATrainer:
     def __init__(self, img_path, img_size=48, channels=11, pool_size=256,
                  batch_size=8, lr=1e-3, delta=0.25, rule="tanh", margin=None,
-                 fire_rate=0.5, fg_weight=3.0, mlp_hidden=128, device=None,
-                 checkpoint_dir=None):
+                 fire_rate=0.5, fg_weight=3.0, mlp_hidden=128,
+                 mlp_state_input=True, device=None, checkpoint_dir=None):
         self.device = device or ('cuda' if torch.cuda.is_available() else 'cpu')
         image_name = os.path.splitext(os.path.basename(img_path))[0]
         self.checkpoint_dir = checkpoint_dir or os.path.join(
@@ -40,8 +67,8 @@ class CATrainer:
         # the update rule; 0 falls back to the legacy conv-only kernel
         if mlp_hidden:
             self.model = MLPCAModel(channels=channels, hidden_dim=mlp_hidden,
-                                    delta=delta, rule=rule,
-                                    fire_rate=fire_rate).to(self.device)
+                                    delta=delta, rule=rule, fire_rate=fire_rate,
+                                    state_input=mlp_state_input).to(self.device)
         else:
             self.model = CAModel(channels=channels, delta=delta, rule=rule,
                                  fire_rate=fire_rate).to(self.device)
@@ -114,6 +141,28 @@ class CATrainer:
             overflow = overflow + ov
         return x, overflow
 
+    def _compute_loss(self, x, target_batch, target_edges, dead_cells, has_dead_zone,
+                      overflow_total, steps, edge_weight, overflow_weight, leak_weight, distance):
+        """Reconstruction (rgb + Sobel edges, via `distance`) plus the overflow
+        and hidden-leak penalties. Returns (loss, rgb_loss, edge_loss, hidden_leak)
+        so the caller can log the components alongside the combined total."""
+        if has_dead_zone:
+            hidden_leak = (x[:, 3:] ** 2 * self.dead_mask).sum() \
+                / (dead_cells * (self.channels - 3) * x.shape[0])
+        else:
+            hidden_leak = x.new_zeros(())
+
+        weight_norm = self.pixel_weight.sum() * x.shape[0]
+        rgb_loss = (distance(x[:, :3] - target_batch) * self.pixel_weight).sum() / (weight_norm * 3)
+        edge_loss = (distance(self._edges(x[:, :3]) - target_edges) * self.pixel_weight).sum() / (weight_norm * 6)
+
+        loss = rgb_loss \
+            + edge_weight * edge_loss \
+            + overflow_weight * overflow_total / steps \
+            + leak_weight * hidden_leak
+
+        return loss, rgb_loss, edge_loss, hidden_leak
+
     def save_checkpoint(self, epoch, smooth_loss):
         os.makedirs(self.checkpoint_dir, exist_ok=True)
         stem = f"epoch_{epoch:06d}"
@@ -126,18 +175,22 @@ class CATrainer:
             # caller having to know how it was trained
             "config": {"size": self.size, "channels": self.channels,
                        "rule": self.model.rule, "fire_rate": self.model.fire_rate,
-                       "mlp_hidden": getattr(self.model, "hidden_dim", 0)},
+                       "mlp_hidden": getattr(self.model, "hidden_dim", 0),
+                       "mlp_state_input": getattr(self.model, "state_input", False)},
         }, os.path.join(self.checkpoint_dir, f"{stem}.pt"))
 
         self.model.exportToPlaygroundFormat(self.checkpoint_dir, filepath=f"{stem}.json")
 
     def train(self, epochs=4000, min_steps=None, max_steps=None,
               overflow_weight=0.1, leak_weight=0.5, edge_weight=2.0,
-              damage_n=2, grad_ckpt_steps=64, print_every=50, checkpoint_every=1000,
-              catch_interrupt=True, label=None):
+              damage_n=2, grad_ckpt_steps=64, print_every=10, checkpoint_every=1000,
+              catch_interrupt=True, label=None, loss_fn="huber"):
         """catch_interrupt=True swallows Ctrl+C and keeps the best weights
         (interactive use); grid_search passes False so one Ctrl+C can abort
-        the whole sweep instead of silently skipping to the next config."""
+        the whole sweep instead of silently skipping to the next config.
+        loss_fn selects the rgb/edge reconstruction distance - one of
+        LOSS_FUNCTIONS ("mse", "l1", "huber")."""
+        distance = LOSS_FUNCTIONS[loss_fn]
         # Information crosses ~2px per step (5x5 kernel), halved by the fire
         # rate, so the step budget must grow with the canvas: too few steps
         # and the far side of the pattern can never even be reached, let
@@ -145,7 +198,7 @@ class CATrainer:
         if min_steps is None:
             min_steps = self.size
         if max_steps is None:
-            max_steps = 2 * self.size
+            max_steps = 3 * self.size
         damage_n = min(damage_n, self.batch_size - 1)
 
         self.scheduler = optim.lr_scheduler.CosineAnnealingLR(
@@ -204,23 +257,9 @@ class CATrainer:
                         overflow_total = overflow_total + ov
                         remaining -= seg
 
-                    # hidden activity must be dead in the margin, not merely
-                    # invisible — leaked hidden state grows without bound once the
-                    # canvas is bigger than the training grid
-                    if has_dead_zone:
-                        hidden_leak = (x[:, 3:] ** 2 * self.dead_mask).sum() \
-                            / (dead_cells * (self.channels - 3) * x.shape[0])
-                    else:
-                        hidden_leak = x.new_zeros(())
-
-                    weight_norm = self.pixel_weight.sum() * x.shape[0]
-                    rgb_loss = ((x[:, :3] - target_batch) ** 2 * self.pixel_weight).sum() / (weight_norm * 3)
-                    edge_loss = ((self._edges(x[:, :3]) - target_edges) ** 2 * self.pixel_weight).sum() / (weight_norm * 6)
-
-                    loss = rgb_loss \
-                        + edge_weight * edge_loss \
-                        + overflow_weight * overflow_total / steps \
-                        + leak_weight * hidden_leak
+                    loss, rgb_loss, edge_loss, hidden_leak = self._compute_loss(
+                        x, target_batch, target_edges, dead_cells, has_dead_zone,
+                        overflow_total, steps, edge_weight, overflow_weight, leak_weight, distance)
 
                     self.optimizer.zero_grad()
                     loss.backward()

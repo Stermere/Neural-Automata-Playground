@@ -71,13 +71,14 @@ def verify_shader_parity(channels=11, size=12, rule="tanh", delta=0.25, fire_rat
 
 
 def verify_shader_parity_mlp(channels=11, hidden_dim=8, size=8, rule="tanh",
-                             delta=0.25, fire_rate=0.5):
+                             delta=0.25, fire_rate=0.5, state_input=True):
     """Plain-loop mirror of the compute shader's MLP path (the 5x5 wrapped
     conv, then the per-cell hidden ReLU layer and output layer applied to the
-    conv results) against MLPCAModel.step. Catches any weight-layout mistake
-    before training."""
+    conv results — plus, with state_input, the cell's own raw state as a
+    second block of MLP inputs) against MLPCAModel.step. Catches any
+    weight-layout mistake before training."""
     model = MLPCAModel(channels=channels, hidden_dim=hidden_dim, delta=delta,
-                       rule=rule, fire_rate=fire_rate)
+                       rule=rule, fire_rate=fire_rate, state_input=state_input)
     with torch.no_grad():
         model.conv.weight.uniform_(-0.5, 0.5)
         model.w1.weight.uniform_(-0.5, 0.5)
@@ -95,7 +96,7 @@ def verify_shader_parity_mlp(channels=11, hidden_dim=8, size=8, rule="tanh",
     w = model.conv.weight
     k = w.shape[-1]
     half = k // 2
-    w1 = model.w1.weight.squeeze(-1).squeeze(-1)  # [hidden][channels]
+    w1 = model.w1.weight.squeeze(-1).squeeze(-1)  # [hidden][channels or 2*channels]
     b1 = model.w1.bias
     w2 = model.w2.weight.squeeze(-1).squeeze(-1)  # [channels][hidden]
     b2 = model.w2.bias
@@ -114,9 +115,13 @@ def verify_shader_parity_mlp(channels=11, hidden_dim=8, size=8, rule="tanh",
                             weight = w[out_ch, in_ch, ky + half, kx + half].item()
                             state = x[0, in_ch, (y + ky) % size, (px + kx) % size].item()
                             sums[out_ch] += weight * state
-            # the per-cell MLP applied to the conv outputs
-            hidden = [max(b1[j].item() + sum(w1[j, ch].item() * sums[ch]
-                                             for ch in range(channels)), 0.0)
+            # the per-cell MLP inputs: conv outputs, then (with state_input)
+            # the cell's raw state — the shader's mlpWeights column order
+            inputs = list(sums)
+            if state_input:
+                inputs += [x[0, ch, y, px].item() for ch in range(channels)]
+            hidden = [max(b1[j].item() + sum(w1[j, i].item() * inputs[i]
+                                             for i in range(len(inputs))), 0.0)
                       for j in range(hidden_dim)]
             for out_ch in range(channels):
                 conv_x = b2[out_ch].item() + sum(w2[out_ch, j].item() * hidden[j]
