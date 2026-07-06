@@ -37,7 +37,14 @@ UPDATE_RULES = {
         "margin": (0.0, 1.0),
         "wgsl_update": "lastX + NCA_DELTA[ch] * tanh(convX + NCA_BIAS[ch])",
     },
+    "relu": {
+        # ReLU floored at -0.5 instead of 0: max(conv, 0) - 0.5
+        "step": lambda x, conv, delta: x + delta * (F.relu(conv) - 0.5),
+        "margin": (-0.5, 2.5),
+        "wgsl_update": "lastX + NCA_DELTA[ch] * (max(convX + NCA_BIAS[ch], 0.0) - 0.5)",
+    },
 }
+
 
 WGSL_GATE = """const NCA_FIRE_RATE: f32 = {fire_rate};
 

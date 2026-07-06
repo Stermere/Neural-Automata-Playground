@@ -8,6 +8,7 @@ The implementation lives in the sibling modules:
   grid_search.py — hyperparameter sweeps over CATrainer
 """
 import argparse
+import os
 
 from ca_model import PLAYGROUND_MAX_CHANNELS, UPDATE_RULES
 from parity import verify_shader_parity, verify_shader_parity_mlp
@@ -18,20 +19,25 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Pre-train an NCA kernel for the WebGPU playground")
     parser.add_argument("--image", default=default_image)
     parser.add_argument("--size", type=int, default=32)
-    parser.add_argument("--epochs", type=int, default=4000)
-    parser.add_argument("--channels", type=int, default=11)
+    parser.add_argument("--epochs", type=int, default=10000)
+    parser.add_argument("--channels", type=int, default=16)
     parser.add_argument("--pool-size", type=int, default=256,
                         help="number of persistent samples kept in the training pool")
-    parser.add_argument("--batch-size", type=int, default=8,
+    parser.add_argument("--batch-size", type=int, default=2,
                         help="samples drawn from the pool per training step")
-    parser.add_argument("--lr", type=float, default=1e-3)
+    parser.add_argument("--lr", type=float, default=None,
+                        help="learning rate; default 1e-3 for a fresh run. With --resume, "
+                             "passing this overrides the checkpoint's saved (already-decayed) "
+                             "rate — use it to run a new stage at a different lr instead of "
+                             "continuing the previous stage's cosine schedule; omit it to keep "
+                             "the checkpoint's rate as-is")
     parser.add_argument("--rule", choices=list(UPDATE_RULES), default="tanh")
-    parser.add_argument("--delta", type=float, default=0.25,
+    parser.add_argument("--delta", type=float, default=1,
                         help="initial per-channel update strength (learned during training)")
     parser.add_argument("--fire-rate", type=float, default=0.5,
                         help="probability a cell applies its update each step (stochastic "
                              "updates, exported as a hash gate); 1.0 disables the gate")
-    parser.add_argument("--mlp-hidden", type=int, default=128,
+    parser.add_argument("--mlp-hidden", type=int, default=32,
                         help="hidden units of the per-cell MLP inserted between the 5x5 "
                              "conv outputs and the update rule (conv -> ReLU layer -> "
                              "output layer); 0 trains the legacy conv-only kernel")
@@ -41,7 +47,7 @@ if __name__ == "__main__":
                              "kept for A/B comparison)")
     parser.add_argument("--steps", type=int, default=400, help="animation steps")
     parser.add_argument("--min-steps", type=int, default=None,
-                        help="min rollout steps per training epoch; default = --size")
+                        help="min rollout steps per training epoch; default = 2x --size")
     parser.add_argument("--max-steps", type=int, default=None,
                         help="max rollout steps per training epoch; default = 3x --size")
     parser.add_argument("--quantize", action="store_true", help="emulate 8-bit visible channels in animation")
@@ -50,11 +56,11 @@ if __name__ == "__main__":
                          help="blank margin (px) around the target inside the training canvas, "
                               "so growth doesn't rely on wraparound at one exact canvas size; "
                               "default scales with --size (~15%% per side), use 0 for the old edge-to-edge behavior")
-    parser.add_argument("--leak-weight", type=float, default=0.5,
+    parser.add_argument("--leak-weight", type=float, default=0.1,
                         help="penalty on hidden-channel activity in the dead margin; "
                              "keeps the pattern from sprouting worm structures into empty "
                              "space on canvases larger than the training grid")
-    parser.add_argument("--edge-weight", type=float, default=2.0,
+    parser.add_argument("--edge-weight", type=float, default=0.25,
                         help="weight of the Sobel edge loss; pushes for sharp boundaries "
                              "instead of MSE's blurry average")
     parser.add_argument("--fg-weight", type=float, default=3.0,
@@ -70,13 +76,24 @@ if __name__ == "__main__":
                         help="rollout steps per gradient-checkpoint segment; cuts backprop "
                              "memory so long rollouts / big canvases fit, at ~1/3 extra "
                              "compute; 0 disables checkpointing")
-    parser.add_argument("--checkpoint-every", type=int, default=1000,
+    parser.add_argument("--checkpoint-every", type=int, default=500,
                         help="save a checkpoint every N epochs (0 to disable periodic saves)")
     parser.add_argument("--checkpoint-dir", default=None,
                          help="directory for this run's checkpoints; "
-                              "defaults to a new timestamped folder under kernalPreTraining/checkpoints")
+                              "defaults to a new timestamped folder under kernalPreTraining/checkpoints "
+                              "(or, with --resume, the resumed checkpoint's own folder)")
+    parser.add_argument("--resume", default=None,
+                        help="path to a .pt checkpoint to resume from (model + optimizer "
+                             "state and epoch count); pool and best-eval bookkeeping restart "
+                             "fresh, and the LR schedule restarts a clean cosine decay over "
+                             "the epochs remaining (see --lr to also change the rate). "
+                             "--epochs is the new total epoch target, not an additional count")
     parser.add_argument("-y", "--export", action="store_true", help="export without prompting")
     args = parser.parse_args()
+
+    checkpoint_dir = args.checkpoint_dir
+    if args.resume and checkpoint_dir is None:
+        checkpoint_dir = os.path.dirname(args.resume)
 
     if args.channels > PLAYGROUND_MAX_CHANNELS:
         parser.error(f"--channels {args.channels} exceeds the playground's maximum of "
@@ -92,11 +109,12 @@ if __name__ == "__main__":
 
     trainer = CATrainer(args.image, img_size=args.size, channels=args.channels,
                         pool_size=args.pool_size, batch_size=args.batch_size,
-                        lr=args.lr, rule=args.rule, delta=args.delta, margin=args.margin,
+                        lr=args.lr if args.lr is not None else 1e-3,
+                        rule=args.rule, delta=args.delta, margin=args.margin,
                         fire_rate=args.fire_rate, fg_weight=args.fg_weight,
                         mlp_hidden=args.mlp_hidden,
                         mlp_state_input=not args.mlp_no_state_input,
-                        checkpoint_dir=args.checkpoint_dir)
+                        checkpoint_dir=checkpoint_dir)
     arch = (f"mlp_hidden={args.mlp_hidden}"
             f"{'' if args.mlp_no_state_input else '+state'}"
             if args.mlp_hidden else "legacy 5x5 conv")
@@ -105,10 +123,17 @@ if __name__ == "__main__":
           f"batch={args.batch_size}, device={trainer.device})")
     print(f"Checkpoints: {trainer.checkpoint_dir}")
 
+    start_epoch = 0
+    if args.resume:
+        start_epoch = trainer.load_checkpoint(args.resume, lr=args.lr) + 1
+        lr_now = trainer.optimizer.param_groups[0]['lr']
+        print(f"Resumed from {args.resume} at epoch {start_epoch}, lr={lr_now:g}")
+
     trainer.train(epochs=args.epochs, min_steps=args.min_steps, max_steps=args.max_steps,
                   overflow_weight=args.overflow_weight, leak_weight=args.leak_weight,
                   edge_weight=args.edge_weight, damage_n=args.damage_n,
-                  grad_ckpt_steps=args.grad_ckpt_steps, checkpoint_every=args.checkpoint_every)
+                  grad_ckpt_steps=args.grad_ckpt_steps, checkpoint_every=args.checkpoint_every,
+                  start_epoch=start_epoch)
     trainer.model.loadBest()
     trainer.evaluate_robustness()
 

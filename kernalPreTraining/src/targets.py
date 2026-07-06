@@ -1,23 +1,22 @@
 """Seed and target-image helpers."""
-import random
-
 import torch
 import torchvision.transforms as T
 from PIL import Image
 
 
-def make_seed(channels, size, batch=1, radius=0, jitter=0):
+def make_seed(channels, size, batch=1, radius=0, noise=0.0):
     """All channels 1.0 in a small blob near the center.
-    radius=0, jitter=0 (the default) is a single pixel, matching the browser's
-    smallest brush. Training reseeds with randomized radius/jitter so the
-    model tolerates a real brush's imprecision instead of requiring a
-    mathematically perfect dab."""
+    radius=0, noise=0.0 (the default) is a single pixel, matching the
+    browser's smallest brush. Training reseeds with randomized radius and a
+    touch of value noise so the model tolerates a real brush's imprecision
+    instead of requiring a mathematically perfect dab."""
     seed = torch.zeros(batch, channels, size, size)
-    cy = size // 2 + (random.randint(-jitter, jitter) if jitter else 0)
-    cx = size // 2 + (random.randint(-jitter, jitter) if jitter else 0)
+    cy, cx = size // 2, size // 2
     y0, y1 = max(0, cy - radius), min(size, cy + radius + 1)
     x0, x1 = max(0, cx - radius), min(size, cx + radius + 1)
     seed[:, :, y0:y1, x0:x1] = 1.0
+    if noise:
+        seed = (seed + noise * torch.randn_like(seed)).clamp(0.0, 1.0)
     return seed
 
 

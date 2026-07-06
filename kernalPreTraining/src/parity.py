@@ -60,6 +60,8 @@ def verify_shader_parity(channels=11, size=12, rule="tanh", delta=0.25, fire_rat
                             conv_x += weight * state
                 if rule == "linear":
                     pre = last + delta_c * (conv_x + bias_c)
+                elif rule == "relu":
+                    pre = last + delta_c * (max(conv_x + bias_c, 0.0) - 0.5)
                 else:
                     pre = last + delta_c * torch.tanh(torch.tensor(conv_x + bias_c)).item()
                 expected[0, out_ch, y, px] = min(max(pre, 0.0), 1.0)
@@ -130,6 +132,8 @@ def verify_shader_parity_mlp(channels=11, hidden_dim=8, size=8, rule="tanh",
                 delta_c = model.delta[out_ch].item()
                 if rule == "linear":
                     pre = last + delta_c * conv_x
+                elif rule == "relu":
+                    pre = last + delta_c * (max(conv_x, 0.0) - 0.5)
                 else:
                     pre = last + delta_c * torch.tanh(torch.tensor(conv_x)).item()
                 expected[0, out_ch, y, px] = min(max(pre, 0.0), 1.0)

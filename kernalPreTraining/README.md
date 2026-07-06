@@ -170,8 +170,8 @@ playground) load exactly as before.
 
 ## Notes
 
-- Training reseeds with a randomized dab (a 1-5px blob, jittered a few
-  pixels off-center) so the kernel tolerates the imprecision of a real
+- Training reseeds with a randomized dab (a 1-5px blob with a touch of
+  value noise) so the kernel tolerates the imprecision of a real
   brush click, not just a mathematically perfect single pixel. The default
   `--margin` keeps the target away from the training canvas edge so growth
   doesn't depend on wraparound at one exact canvas size. Together these are

@@ -181,32 +181,56 @@ class CATrainer:
 
         self.model.exportToPlaygroundFormat(self.checkpoint_dir, filepath=f"{stem}.json")
 
+    def load_checkpoint(self, path, lr=None):
+        """Restore model + optimizer state from a saved checkpoint so training
+        can continue from where it left off. The pool and best-eval snapshot
+        aren't part of the checkpoint, so they restart fresh (best-eval seeded
+        with the checkpoint's own loss/weights). lr, if given, overrides the
+        optimizer's loaded (already-decayed) learning rate — pass it to run a
+        later training stage at a different rate instead of wherever the
+        previous run's cosine schedule left off. Returns the epoch it was
+        saved at, so the caller can resume epoch numbering from there."""
+        ckpt = torch.load(path, map_location=self.device)
+        self.model.load_state_dict(ckpt["model_state"])
+        self.optimizer.load_state_dict(ckpt["optimizer_state"])
+        if lr is not None:
+            for group in self.optimizer.param_groups:
+                group["lr"] = lr
+        self.model.bestEval = ckpt["loss"]
+        self.model.best_weights = {k: v.clone() for k, v in ckpt["model_state"].items()}
+        return ckpt["epoch"]
+
     def train(self, epochs=4000, min_steps=None, max_steps=None,
-              overflow_weight=0.1, leak_weight=0.5, edge_weight=2.0,
-              damage_n=2, grad_ckpt_steps=64, print_every=10, checkpoint_every=1000,
-              catch_interrupt=True, label=None, loss_fn="huber"):
+              overflow_weight=0.1, leak_weight=0.1, edge_weight=2.0,
+              damage_n=1, grad_ckpt_steps=64, print_every=4, checkpoint_every=1000,
+              catch_interrupt=True, label=None, loss_fn="mse", start_epoch=0):
         """catch_interrupt=True swallows Ctrl+C and keeps the best weights
         (interactive use); grid_search passes False so one Ctrl+C can abort
         the whole sweep instead of silently skipping to the next config.
         loss_fn selects the rgb/edge reconstruction distance - one of
-        LOSS_FUNCTIONS ("mse", "l1", "huber")."""
+        LOSS_FUNCTIONS ("mse", "l1", "huber"). start_epoch resumes numbering
+        after load_checkpoint(); the LR schedule always decays fresh, from
+        whatever rate the optimizer currently has, over the epochs remaining
+        in this call (epochs - start_epoch) — so a new stage with a new lr
+        (via load_checkpoint's lr=) gets its own clean cosine decay rather
+        than continuing the previous stage's curve."""
         distance = LOSS_FUNCTIONS[loss_fn]
         # Information crosses ~2px per step (5x5 kernel), halved by the fire
         # rate, so the step budget must grow with the canvas: too few steps
         # and the far side of the pattern can never even be reached, let
         # alone refined.
         if min_steps is None:
-            min_steps = self.size
+            min_steps = 2 * self.size
         if max_steps is None:
             max_steps = 3 * self.size
         damage_n = min(damage_n, self.batch_size - 1)
 
         self.scheduler = optim.lr_scheduler.CosineAnnealingLR(
-            self.optimizer, T_max=max(1, epochs), eta_min=1e-4)
+            self.optimizer, T_max=max(1, epochs - start_epoch), eta_min=1e-4)
         target_batch = self.target.expand(self.batch_size, -1, -1, -1)
         target_edges = self.target_edges.expand(self.batch_size, -1, -1, -1)
         running = deque(maxlen=50)
-        epoch = 0
+        epoch = start_epoch
 
         # the dead zone is empty when the margin is smaller than the halo
         # (tiny grids) or there are no hidden channels — dividing by its
@@ -225,18 +249,18 @@ class CATrainer:
                 f"grad checkpoint segment={grad_ckpt_steps if grad_ckpt_steps else 'off'}, "
                 f"leak zone={'active' if has_dead_zone else 'EMPTY (margin too small, leak penalty off)'}")
             try:
-                for epoch in range(epochs):
+                for epoch in range(start_epoch, epochs):
                     idx = torch.randint(0, self.pool_size, (self.batch_size,))
                     x = self.pool[idx]
 
                     # reseed the worst-looking sample so growth from seed keeps training;
-                    # randomize the seed's radius/jitter so the model learns to grow
-                    # correctly from an imprecise brush dab, not just a perfect pixel
+                    # randomize the seed's radius and add a touch of value noise so the
+                    # model learns to grow correctly from an imprecise brush dab, not
+                    # just a perfect pixel
                     with torch.no_grad():
                         per_sample = ((x[:, :3] - target_batch) ** 2).mean(dim=(1, 2, 3))
                     radius = random.choices([0, 1, 2], weights=[0.6, 0.3, 0.1])[0]
-                    jitter = random.randint(0, 3)
-                    reseed = make_seed(self.channels, self.size, radius=radius, jitter=jitter).to(self.device)
+                    reseed = make_seed(self.channels, self.size, radius=radius, noise=0.1).to(self.device)
                     worst = per_sample.argmax().item()
                     x[worst] = reseed[0]
 
