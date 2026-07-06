@@ -10,19 +10,27 @@ const KERNEL_AREA: u32 = u32(KERNEL_SIZE * KERNEL_SIZE);
 
 @computeKernelFlag
 
-// MLP stage (trained kernels): a per-cell two-layer MLP
-// (hidden ReLU layer, then an output layer) applied to the conv results
-// before the activation, giving the update rule a genuine nonlinearity.
+// MLP stage (trained kernels): a per-cell MLP (hidden ReLU layer, optionally
+// a second hidden ReLU layer, then an output layer) applied to the conv
+// results before the activation, giving the update rule a genuine nonlinearity.
 @useMlpFlag
 const MLP_HIDDEN: u32 = @mlpHiddenu;
 // MLP input width: the CHANNEL_COUNT conv results, doubled when the kernel
 // was trained with the cell's own raw state as extra MLP inputs (stateInput)
 const MLP_IN: u32 = @mlpInu;
+// Second hidden layer (kernels trained with hidden_dim2): when absent this
+// is templated to CHANNEL_COUNT instead, which makes w2 the output layer
+// and collapses the offsets below to the original single-hidden-layer layout
+@useMlpLayer2Flag
+const MLP_HIDDEN2: u32 = @mlpHidden2u;
 // Offsets into the flat mlpWeights buffer:
-// [w1: MLP_HIDDEN x MLP_IN][b1: MLP_HIDDEN][w2: CHANNEL_COUNT x MLP_HIDDEN][b2: CHANNEL_COUNT]
+// [w1: MLP_HIDDEN x MLP_IN][b1: MLP_HIDDEN][w2: MLP_HIDDEN2 x MLP_HIDDEN][b2: MLP_HIDDEN2]
+// plus, when USE_MLP_LAYER2, [w3: CHANNEL_COUNT x MLP_HIDDEN2][b3: CHANNEL_COUNT]
 const MLP_B1_OFFSET: u32 = MLP_HIDDEN * MLP_IN;
 const MLP_W2_OFFSET: u32 = MLP_B1_OFFSET + MLP_HIDDEN;
-const MLP_B2_OFFSET: u32 = MLP_W2_OFFSET + CHANNEL_COUNT * MLP_HIDDEN;
+const MLP_B2_OFFSET: u32 = MLP_W2_OFFSET + MLP_HIDDEN2 * MLP_HIDDEN;
+const MLP_W3_OFFSET: u32 = MLP_B2_OFFSET + MLP_HIDDEN2;
+const MLP_B3_OFFSET: u32 = MLP_W3_OFFSET + CHANNEL_COUNT * MLP_HIDDEN2;
 
 // Bindings
 @group(0) @binding(0)
@@ -161,18 +169,42 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
       hiddenAct[j] = max(acc, 0.0);
     }
 
-    // ... then the output layer becomes the per-channel update signal,
-    // handed to the exported activation exactly like the raw convX
-    var mlpOut: array<f32, CHANNEL_COUNT>;
-    for (var outCh: u32 = 0u; outCh < CHANNEL_COUNT; outCh++) {
-      var acc: f32 = mlpWeights[MLP_B2_OFFSET + outCh];
-      for (var j: u32 = 0u; j < MLP_HIDDEN; j++) {
-        acc += mlpWeights[MLP_W2_OFFSET + outCh * MLP_HIDDEN + j] * hiddenAct[j];
+    // ... then either straight to the output layer (original single-hidden-
+    // layer kernels), or through a second hidden ReLU layer first, becoming
+    // the per-channel update signal handed to the exported activation
+    // exactly like the raw convX
+    if (USE_MLP_LAYER2) {
+      var hiddenAct2: array<f32, MLP_HIDDEN2>;
+      for (var j: u32 = 0u; j < MLP_HIDDEN2; j++) {
+        var acc: f32 = mlpWeights[MLP_B2_OFFSET + j];
+        for (var k: u32 = 0u; k < MLP_HIDDEN; k++) {
+          acc += mlpWeights[MLP_W2_OFFSET + j * MLP_HIDDEN + k] * hiddenAct[k];
+        }
+        hiddenAct2[j] = max(acc, 0.0);
       }
-      mlpOut[outCh] = acc;
-      totalWeights[outCh] = 1.0;
+
+      var mlpOut: array<f32, CHANNEL_COUNT>;
+      for (var outCh: u32 = 0u; outCh < CHANNEL_COUNT; outCh++) {
+        var acc: f32 = mlpWeights[MLP_B3_OFFSET + outCh];
+        for (var j: u32 = 0u; j < MLP_HIDDEN2; j++) {
+          acc += mlpWeights[MLP_W3_OFFSET + outCh * MLP_HIDDEN2 + j] * hiddenAct2[j];
+        }
+        mlpOut[outCh] = acc;
+        totalWeights[outCh] = 1.0;
+      }
+      sums = mlpOut;
+    } else {
+      var mlpOut: array<f32, CHANNEL_COUNT>;
+      for (var outCh: u32 = 0u; outCh < CHANNEL_COUNT; outCh++) {
+        var acc: f32 = mlpWeights[MLP_B2_OFFSET + outCh];
+        for (var j: u32 = 0u; j < MLP_HIDDEN; j++) {
+          acc += mlpWeights[MLP_W2_OFFSET + outCh * MLP_HIDDEN + j] * hiddenAct[j];
+        }
+        mlpOut[outCh] = acc;
+        totalWeights[outCh] = 1.0;
+      }
+      sums = mlpOut;
     }
-    sums = mlpOut;
   }
 
   activationContext.timestep = timestepData.x;

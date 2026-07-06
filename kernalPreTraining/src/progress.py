@@ -1,18 +1,22 @@
 """Live training dashboard: a matplotlib window with a loss-curve plot and a
 stats readout, updated in place as training progresses."""
+import math
 import time
 
 import matplotlib.pyplot as plt
 
 _MAX_EPOCHS = 100000  # drop points older than this many epochs so the chart stays windowed to recent training
+_Y_HIGH_PCTL = 90.0  # upper percentile used to clip the y-axis range (ignores rare loss spikes)
+_Y_PADDING_FRAC = 0.08  # extra headroom added above/below the clipped range, as a fraction of its span
+_Y_MIN_SPAN = 1e-5  # smallest allowed span, to avoid a degenerate/zero-height axis
 # (metric key, display label, plot color) - key is what callers pass to update()
 _SERIES = (
     ("loss", "loss (total)", "magenta"),
     ("smooth", "loss (smoothed)", "cyan"),
-    ("rgb", "rgb MSE", "green"),
-    ("edge", "edge MSE", "goldenrod"),
-    ("overflow", "overflow", "blue"),
-    ("leak", "hidden leak MSE", "red"),
+    ("rgb", "rgb loss", "green"),
+    ("edge", "edge loss", "goldenrod"),
+    ("overflow", "overflow loss", "blue"),
+    ("leak", "hidden leak loss", "red"),
 )
 
 
@@ -88,24 +92,47 @@ class TrainingMonitor:
             for name in self.history:
                 self.history[name] = self.history[name][drop:]
 
+        combined_ys = []
         for key, _, _ in _SERIES:
             values = self.history[key]
             xs = [e for e, v in zip(self.epochs, values) if v is not None]
             ys = [v for v in values if v is not None]
             self._lines[key].set_data(xs, ys)
             self._lines[key].set_visible(bool(ys))
+            combined_ys.extend(ys)
 
         active = [line for line in self._lines.values() if line.get_visible()]
         if active:
             self.ax_chart.legend(handles=active, loc="upper right", fontsize=8)
         self.ax_chart.relim()
-        self.ax_chart.autoscale_view()
+        self.ax_chart.autoscale_view(scaley=False)
+        self._apply_y_limits(combined_ys)
         self.ax_chart.set_title(f"{self.title} — epoch {epoch}/{self.total_epochs}")
+
 
         self._stats_text.set_text(self._stats_str())
 
         self.fig.canvas.draw_idle()
         self.fig.canvas.flush_events()
+
+    def _apply_y_limits(self, values):
+        """Clip the y-axis to a robust range so rare loss spikes don't
+        squash the rest of the chart flat."""
+        finite = [v for v in values if v is not None and math.isfinite(v)]
+        if not finite:
+            return
+        low = min(finite)
+        high = _percentile(finite, _Y_HIGH_PCTL)
+        if high < low:
+            high = low
+        span = high - low
+        if span < _Y_MIN_SPAN:
+            mid = (high + low) / 2
+            low = mid - _Y_MIN_SPAN / 2
+            high = mid + _Y_MIN_SPAN / 2
+            span = high - low
+        pad = span * _Y_PADDING_FRAC
+        self.ax_chart.set_ylim(low - pad, high + pad)
 
     def _stats_str(self):
         lines = [f"{'epoch':<18} {self._epoch}/{self.total_epochs}"]
@@ -114,7 +141,7 @@ class TrainingMonitor:
             if values and values[-1] is not None:
                 lines.append(f"{label:<18} {values[-1]:.5f}")
         if self._best is not None:
-            lines.append(f"{'best (smoothed)':<18} {self._best:.5f}")
+            lines.append(f"{'best (eval)':<18} {self._best:.5f}")
         if self._lr is not None:
             lines.append(f"{'lr':<18} {self._lr:.2e}")
         if self.start_time is not None:
@@ -126,6 +153,21 @@ class TrainingMonitor:
             if eta is not None:
                 lines.append(f"{'eta':<18} {_format_duration(eta)}")
         return "\n".join(lines)
+
+
+def _percentile(values, pct):
+    """Linear-interpolated percentile over a list of numbers (no numpy dependency)."""
+    ordered = sorted(values)
+    n = len(ordered)
+    if n == 1:
+        return ordered[0]
+    rank = (pct / 100.0) * (n - 1)
+    low_idx = int(math.floor(rank))
+    high_idx = int(math.ceil(rank))
+    if low_idx == high_idx:
+        return ordered[low_idx]
+    frac = rank - low_idx
+    return ordered[low_idx] + (ordered[high_idx] - ordered[low_idx]) * frac
 
 
 def _format_duration(seconds):

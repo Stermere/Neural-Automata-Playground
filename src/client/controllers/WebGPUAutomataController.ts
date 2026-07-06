@@ -10,6 +10,8 @@ const COMPUTE_KERNEL_TRUE = 'var<private> COMPUTE_KERNEL: bool = true;';
 const COMPUTE_KERNEL_FALSE = 'var<private> COMPUTE_KERNEL: bool = false;';
 const USE_MLP_TRUE = 'var<private> USE_MLP: bool = true;';
 const USE_MLP_FALSE = 'var<private> USE_MLP: bool = false;';
+const USE_MLP_LAYER2_TRUE = 'var<private> USE_MLP_LAYER2: bool = true;';
+const USE_MLP_LAYER2_FALSE = 'var<private> USE_MLP_LAYER2: bool = false;';
 
 export interface AutomataConfig {
   canvas: HTMLCanvasElement;
@@ -480,6 +482,15 @@ export class WebGPUNeuralAutomataController {
     ).replace(
       '@mlpIn',
       `${this.mlp ? MlpUtils.inputDim(this.mlp) : 1}`,
+    ).replace(
+      '@useMlpLayer2Flag',
+      this.mlp?.hiddenDim2 ? USE_MLP_LAYER2_TRUE : USE_MLP_LAYER2_FALSE,
+    ).replace(
+      // Falls back to the channel count when there's no second hidden layer,
+      // which collapses the shader's MLP_HIDDEN2-parameterized offsets to
+      // today's [w1][b1][w2][b2] layout exactly (see compute.wgsl)
+      '@mlpHidden2',
+      `${this.mlp?.hiddenDim2 ?? this.channelCount}`,
     );
   }
 

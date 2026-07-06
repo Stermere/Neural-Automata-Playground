@@ -73,20 +73,27 @@ def verify_shader_parity(channels=11, size=12, rule="tanh", delta=0.25, fire_rat
 
 
 def verify_shader_parity_mlp(channels=11, hidden_dim=8, size=8, rule="tanh",
-                             delta=0.25, fire_rate=0.5, state_input=True):
+                             delta=0.25, fire_rate=0.5, state_input=True,
+                             hidden_dim2=8):
     """Plain-loop mirror of the compute shader's MLP path (the 5x5 wrapped
-    conv, then the per-cell hidden ReLU layer and output layer applied to the
-    conv results — plus, with state_input, the cell's own raw state as a
-    second block of MLP inputs) against MLPCAModel.step. Catches any
-    weight-layout mistake before training."""
+    conv, then the per-cell hidden ReLU layer(s) and output layer applied to
+    the conv results — plus, with state_input, the cell's own raw state as a
+    second block of MLP inputs) against MLPCAModel.step. hidden_dim2 (falsy
+    to test the original single-hidden-layer shape) adds a second hidden
+    layer before the output layer. Catches any weight-layout mistake before
+    training."""
     model = MLPCAModel(channels=channels, hidden_dim=hidden_dim, delta=delta,
-                       rule=rule, fire_rate=fire_rate, state_input=state_input)
+                       rule=rule, fire_rate=fire_rate, state_input=state_input,
+                       hidden_dim2=hidden_dim2)
     with torch.no_grad():
         model.conv.weight.uniform_(-0.5, 0.5)
         model.w1.weight.uniform_(-0.5, 0.5)
         model.w1.bias.uniform_(-0.25, 0.25)
         model.w2.weight.uniform_(-0.5, 0.5)
         model.w2.bias.uniform_(-0.25, 0.25)
+        if hidden_dim2:
+            model.w3.weight.uniform_(-0.5, 0.5)
+            model.w3.bias.uniform_(-0.25, 0.25)
         model.delta.uniform_(0.05, 0.5)
     x = torch.rand(1, channels, size, size)
     timestep = random.randint(0, 100_000)
@@ -100,8 +107,11 @@ def verify_shader_parity_mlp(channels=11, hidden_dim=8, size=8, rule="tanh",
     half = k // 2
     w1 = model.w1.weight.squeeze(-1).squeeze(-1)  # [hidden][channels or 2*channels]
     b1 = model.w1.bias
-    w2 = model.w2.weight.squeeze(-1).squeeze(-1)  # [channels][hidden]
+    w2 = model.w2.weight.squeeze(-1).squeeze(-1)  # [channels or hidden2][hidden]
     b2 = model.w2.bias
+    if hidden_dim2:
+        w3 = model.w3.weight.squeeze(-1).squeeze(-1)  # [channels][hidden2]
+        b3 = model.w3.bias
     expected = torch.empty_like(x)
     for y in range(size):
         for px in range(size):
@@ -125,9 +135,17 @@ def verify_shader_parity_mlp(channels=11, hidden_dim=8, size=8, rule="tanh",
             hidden = [max(b1[j].item() + sum(w1[j, i].item() * inputs[i]
                                              for i in range(len(inputs))), 0.0)
                       for j in range(hidden_dim)]
+            if hidden_dim2:
+                hidden2 = [max(b2[j].item() + sum(w2[j, i].item() * hidden[i]
+                                                  for i in range(hidden_dim)), 0.0)
+                          for j in range(hidden_dim2)]
             for out_ch in range(channels):
-                conv_x = b2[out_ch].item() + sum(w2[out_ch, j].item() * hidden[j]
-                                                 for j in range(hidden_dim))
+                if hidden_dim2:
+                    conv_x = b3[out_ch].item() + sum(w3[out_ch, j].item() * hidden2[j]
+                                                     for j in range(hidden_dim2))
+                else:
+                    conv_x = b2[out_ch].item() + sum(w2[out_ch, j].item() * hidden[j]
+                                                     for j in range(hidden_dim))
                 last = x[0, out_ch, y, px].item()
                 delta_c = model.delta[out_ch].item()
                 if rule == "linear":

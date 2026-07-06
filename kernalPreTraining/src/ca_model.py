@@ -214,16 +214,16 @@ class CAModel(_CAModelBase):
 
 # ======================================================
 # MLP model: the same learned 5x5 conv as the legacy model — still exported
-# as `weights`, still editable in the playground — with a per-cell two-layer
-# MLP (1x1 conv -> ReLU -> 1x1 conv) inserted between the conv outputs and
-# the update rule. That MLP is the genuinely nonlinear update a single conv
-# can't express; it ships as an "mlp" block the shader applies to the conv
-# results, while delta/gate ride through the same exported activation code
-# as the legacy model.
+# as `weights`, still editable in the playground — with a per-cell MLP
+# (1x1 conv -> ReLU -> 1x1 conv, optionally -> ReLU -> 1x1 conv again)
+# inserted between the conv outputs and the update rule. That MLP is the
+# genuinely nonlinear update a single conv can't express; it ships as an
+# "mlp" block the shader applies to the conv results, while delta/gate ride
+# through the same exported activation code as the legacy model.
 # ======================================================
 class MLPCAModel(_CAModelBase):
     def __init__(self, channels=11, hidden_dim=128, kernel_size=5, delta=0.25,
-                 rule="tanh", fire_rate=0.5, state_input=True):
+                 rule="tanh", fire_rate=0.5, state_input=True, hidden_dim2=None):
         super().__init__(channels, delta, rule, fire_rate)
         self.hidden_dim = hidden_dim
         # state_input feeds the cell's own raw state to the MLP alongside the
@@ -233,17 +233,29 @@ class MLPCAModel(_CAModelBase):
         # w1's input width everywhere (checkpoints, playground), so old
         # conv-only-input kernels keep loading.
         self.state_input = state_input
+        # hidden_dim2 adds a second hidden layer (w1 -> ReLU -> w2 -> ReLU ->
+        # w3) before the output layer; falsy collapses to the original
+        # single-hidden-layer shape (w1 -> ReLU -> w2) so checkpoints/exports
+        # from before this existed keep loading unchanged.
+        self.hidden_dim2 = hidden_dim2 or 0
         # No conv bias: the shader's conv path is a raw weighted sum, and a
         # per-channel bias before w1 is absorbed exactly by b1 anyway
         self.conv = nn.Conv2d(channels, channels, kernel_size,
                               padding=kernel_size // 2, padding_mode='circular', bias=False)
         self.w1 = nn.Conv2d(channels * (2 if state_input else 1), hidden_dim, 1)
-        self.w2 = nn.Conv2d(hidden_dim, channels, 1)
-        # zero-init the output layer so the CA starts as the identity map
-        # (the Growing-NCA trick: early rollouts don't explode); the conv and
-        # w1 keep their default init so the MLP has features to select from
-        nn.init.zeros_(self.w2.weight)
-        nn.init.zeros_(self.w2.bias)
+        # zero-init whichever layer is the output layer so the CA starts as
+        # the identity map (the Growing-NCA trick: early rollouts don't
+        # explode); every layer feeding into it keeps its default init so
+        # the MLP has features to select from
+        if self.hidden_dim2:
+            self.w2 = nn.Conv2d(hidden_dim, self.hidden_dim2, 1)
+            self.w3 = nn.Conv2d(self.hidden_dim2, channels, 1)
+            nn.init.zeros_(self.w3.weight)
+            nn.init.zeros_(self.w3.bias)
+        else:
+            self.w2 = nn.Conv2d(hidden_dim, channels, 1)
+            nn.init.zeros_(self.w2.weight)
+            nn.init.zeros_(self.w2.bias)
 
     def _conv_out(self, x):
         h = self.conv(x)
@@ -251,26 +263,37 @@ class MLPCAModel(_CAModelBase):
             # conv results first, then the raw state — the shader's
             # mlpWeights layout and the export both assume this order
             h = torch.cat([h, x], dim=1)
-        return self.w2(F.relu(self.w1(h)))
+        h = F.relu(self.w1(h))
+        if self.hidden_dim2:
+            h = F.relu(self.w2(h))
+            return self.w3(h)
+        return self.w2(h)
 
     def exportToPlaygroundFormat(self, save_dir, filepath="TrainedWeights.json"):
         weights = self.conv.weight.detach().cpu().tolist()  # [out][in][5][5] — the shader's layout
         assert len(weights) == self.channels and len(weights[0]) == self.channels
 
+        # Flattened by the playground into the shader's mlpWeights buffer as
+        # [w1][b1][w2][b2] (plus [w3][b3] when hidden_dim2 is set); the final
+        # layer's bias ships here, so NCA_BIAS is zero. stateInput is
+        # informational — the playground infers the MLP input width from
+        # w1's row length.
+        mlp = {
+            "hiddenDim": self.hidden_dim,
+            "stateInput": self.state_input,
+            "w1": self.w1.weight.detach().cpu().squeeze(-1).squeeze(-1).tolist(),
+            "b1": self.w1.bias.detach().cpu().tolist(),
+            "w2": self.w2.weight.detach().cpu().squeeze(-1).squeeze(-1).tolist(),
+            "b2": self.w2.bias.detach().cpu().tolist(),
+        }
+        if self.hidden_dim2:
+            mlp["hiddenDim2"] = self.hidden_dim2
+            mlp["w3"] = self.w3.weight.detach().cpu().squeeze(-1).squeeze(-1).tolist()
+            mlp["b3"] = self.w3.bias.detach().cpu().tolist()
+
         export_dict = {
             "weights": weights,
-            # Flattened by the playground into the shader's mlpWeights buffer
-            # as [w1][b1][w2][b2]; w2's bias ships here, so NCA_BIAS is zero.
-            # stateInput is informational — the playground infers the MLP
-            # input width from w1's row length.
-            "mlp": {
-                "hiddenDim": self.hidden_dim,
-                "stateInput": self.state_input,
-                "w1": self.w1.weight.detach().cpu().squeeze(-1).squeeze(-1).tolist(),
-                "b1": self.w1.bias.detach().cpu().tolist(),
-                "w2": self.w2.weight.detach().cpu().squeeze(-1).squeeze(-1).tolist(),
-                "b2": self.w2.bias.detach().cpu().tolist(),
-            },
+            "mlp": mlp,
             "activationCode": self._export_activation_code([0.0] * self.channels),
             "normalize": False
         }
@@ -287,9 +310,15 @@ def model_from_checkpoint(checkpoint, rule=None, fire_rate=None):
     rule = rule if rule is not None else config.get("rule", "tanh")
     fire_rate = fire_rate if fire_rate is not None else config.get("fire_rate", 0.5)
     if "w2.weight" in state:
-        channels = state["w2.weight"].shape[0]
+        # w3 present means w2 is an interior hidden layer (its output width
+        # is hidden_dim2, not the channel count) and w3 is the real output
+        # layer; its absence is the original single-hidden-layer shape.
+        has_layer2 = "w3.weight" in state
+        channels = state["w3.weight"].shape[0] if has_layer2 else state["w2.weight"].shape[0]
+        hidden_dim2 = state["w2.weight"].shape[0] if has_layer2 else 0
         model = MLPCAModel(channels=channels,
                            hidden_dim=state["w1.weight"].shape[0],
+                           hidden_dim2=hidden_dim2,
                            # w1 twice as wide as the channel count means the
                            # cell state was concatenated to the MLP input
                            state_input=state["w1.weight"].shape[1] == 2 * channels,

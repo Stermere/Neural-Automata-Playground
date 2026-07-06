@@ -32,13 +32,14 @@ import torch
 
 from parity import verify_shader_parity, verify_shader_parity_mlp
 from paths import checkpoints_root, default_image
-from trainer import CATrainer
+from trainer import CATrainer, robustness_score
 
 # sweepable name -> CATrainer.__init__ keyword
 TRAINER_KEYS = {"size": "img_size", "channels": "channels", "pool_size": "pool_size",
                 "batch_size": "batch_size", "lr": "lr", "delta": "delta", "rule": "rule",
                 "margin": "margin", "fire_rate": "fire_rate", "fg_weight": "fg_weight",
-                "mlp_hidden": "mlp_hidden", "mlp_state_input": "mlp_state_input"}
+                "mlp_hidden": "mlp_hidden", "mlp_hidden2": "mlp_hidden2",
+                "mlp_state_input": "mlp_state_input"}
 # sweepable names passed straight to CATrainer.train
 TRAIN_KEYS = ("epochs", "min_steps", "max_steps", "overflow_weight", "leak_weight",
               "edge_weight", "damage_n", "grad_ckpt_steps")
@@ -67,12 +68,6 @@ def parse_grid(specs):
     return grid
 
 
-def score_run(eval_results):
-    mean_mse = sum(r["mse"] for r in eval_results) / len(eval_results)
-    max_leak = max(r["leak"] for r in eval_results)
-    return mean_mse + max_leak, mean_mse, max_leak
-
-
 def print_leaderboard(runs):
     print("\n=== Leaderboard (lower score is better) ===")
     for rank, run in enumerate(sorted(runs, key=lambda r: r["score"]), 1):
@@ -94,6 +89,10 @@ def main():
     parser.add_argument("--mlp-hidden", type=int, default=128,
                         help="hidden units of the per-cell MLP for runs that don't sweep "
                              "mlp-hidden; 0 trains the legacy conv-only kernel")
+    parser.add_argument("--mlp-hidden2", type=int, default=None,
+                        help="hidden units of a second per-cell MLP layer for runs that "
+                             "don't sweep mlp-hidden2; defaults to --mlp-hidden's width, "
+                             "0 trains the original single-hidden-layer MLP")
     parser.add_argument("--epochs", type=int, default=1200,
                         help="epochs per config — a screening budget; re-train the winner "
                              "with Train.py at full length")
@@ -107,6 +106,8 @@ def main():
                         help="output folder; defaults to a timestamped gridsearch folder "
                              "under kernalPreTraining/checkpoints")
     args = parser.parse_args()
+    if args.mlp_hidden2 is None:
+        args.mlp_hidden2 = args.mlp_hidden
 
     from ca_model import PLAYGROUND_MAX_CHANNELS
     grid = parse_grid(args.sweep)
@@ -127,9 +128,11 @@ def main():
             for mlp_hidden in set(grid.get("mlp_hidden", [args.mlp_hidden])):
                 if mlp_hidden:
                     for state_input in set(grid.get("mlp_state_input", [1])):
-                        verify_shader_parity_mlp(channels=args.channels, rule=rule,
-                                                 fire_rate=fire_rate,
-                                                 state_input=bool(state_input))
+                        for mlp_hidden2 in set(grid.get("mlp_hidden2", [args.mlp_hidden2])):
+                            verify_shader_parity_mlp(channels=args.channels, rule=rule,
+                                                     fire_rate=fire_rate,
+                                                     state_input=bool(state_input),
+                                                     hidden_dim2=mlp_hidden2)
                 else:
                     verify_shader_parity(channels=args.channels, rule=rule,
                                          fire_rate=fire_rate)
@@ -143,7 +146,7 @@ def main():
             run_dir = os.path.join(sweep_dir, f"run{i:03d}")
 
             trainer_kwargs = {"img_size": args.size, "channels": args.channels,
-                              "mlp_hidden": args.mlp_hidden}
+                              "mlp_hidden": args.mlp_hidden, "mlp_hidden2": args.mlp_hidden2}
             train_kwargs = {"epochs": args.epochs, "print_every": args.print_every,
                             "checkpoint_every": 0, "catch_interrupt": False,
                             "label": f"run {i}/{len(combos)}: {label}"}
@@ -162,7 +165,7 @@ def main():
             trainer.model.loadBest()
             eval_results = trainer.evaluate_robustness(
                 steps=args.eval_steps, extra_sizes=(0, 64), radii=(0, 1), verbose=False)
-            score, mean_mse, max_leak = score_run(eval_results)
+            score, mean_mse, max_leak = robustness_score(eval_results)
             trainer.model.exportToPlaygroundFormat(run_dir)
 
             runs.append({"run": i, "label": label, "params": overrides, "dir": run_dir,
