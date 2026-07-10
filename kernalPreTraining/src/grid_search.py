@@ -39,10 +39,11 @@ TRAINER_KEYS = {"size": "img_size", "channels": "channels", "pool_size": "pool_s
                 "batch_size": "batch_size", "lr": "lr", "delta": "delta", "rule": "rule",
                 "margin": "margin", "fire_rate": "fire_rate", "fg_weight": "fg_weight",
                 "mlp_hidden": "mlp_hidden", "mlp_hidden2": "mlp_hidden2",
-                "mlp_state_input": "mlp_state_input"}
+                "mlp_state_input": "mlp_state_input", "perception_init": "perception_init",
+                "output_init_std": "output_init_std"}
 # sweepable names passed straight to CATrainer.train
 TRAIN_KEYS = ("epochs", "min_steps", "max_steps", "overflow_weight", "leak_weight",
-              "edge_weight", "damage_n", "grad_ckpt_steps")
+              "edge_weight", "fft_weight", "damage_n", "grad_ckpt_steps")
 
 
 def parse_value(text):

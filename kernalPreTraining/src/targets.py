@@ -24,8 +24,22 @@ def load_target_content(path, content_size):
     img = Image.open(path).convert("RGBA")
     black_bg = Image.new("RGBA", img.size, (0, 0, 0, 255))
     img = Image.alpha_composite(black_bg, img).convert("RGB")  # transparency -> black, the CA's zero fixed point
-    transform = T.Compose([T.Resize((content_size, content_size)), T.ToTensor()])
-    return transform(img)  # [3, content_size, content_size]
+
+    # Resize so the longer side fits content_size, preserving aspect ratio
+    # (no squishing), then pad the shorter side with black to make it square.
+    w, h = img.size
+    scale = content_size / max(w, h)
+    new_w, new_h = max(1, round(w * scale)), max(1, round(h * scale))
+    img = img.resize((new_w, new_h), Image.Resampling.BILINEAR)
+
+
+    tensor = T.ToTensor()(img)  # [3, new_h, new_w]
+    canvas = torch.zeros(3, content_size, content_size)
+    y0 = (content_size - new_h) // 2
+    x0 = (content_size - new_w) // 2
+    canvas[:, y0:y0 + new_h, x0:x0 + new_w] = tensor
+    return canvas  # [3, content_size, content_size]
+
 
 
 def pad_to_canvas(content, canvas_size):

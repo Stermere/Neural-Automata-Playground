@@ -10,7 +10,7 @@ The implementation lives in the sibling modules:
 import argparse
 import os
 
-from ca_model import PLAYGROUND_MAX_CHANNELS, UPDATE_RULES
+from ca_model import PERCEPTION_INITIALIZATIONS, PLAYGROUND_MAX_CHANNELS, UPDATE_RULES
 from parity import verify_shader_parity, verify_shader_parity_mlp
 from paths import default_image
 from trainer import CATrainer
@@ -47,35 +47,54 @@ if __name__ == "__main__":
                         help="drop the cell's own raw state from the MLP inputs, leaving "
                              "only the conv outputs (the pre-state-input architecture, "
                              "kept for A/B comparison)")
+    parser.add_argument("--perception-init", choices=PERCEPTION_INITIALIZATIONS,
+                        default="structured",
+                        help="initialization of the trainable 5x5 perception conv: "
+                             "structured uses balanced randomized identity/Sobel-X/"
+                             "Sobel-Y/Laplacian diagonal filters; random and zeros "
+                             "are A/B baselines")
+    parser.add_argument("--output-init-std", type=float, default=1e-3,
+                        help="standard deviation of the MLP's final-layer random "
+                             "weights; small nonzero values preserve near-identity "
+                             "updates while allowing immediate upstream gradients "
+                             "(0 restores exact zero initialization)")
     parser.add_argument("--steps", type=int, default=400, help="animation steps")
     parser.add_argument("--min-steps", type=int, default=None,
-                        help="min rollout steps per training epoch; default = 1")
+                        help="min rollout steps per training epoch; default scales with "
+                             "--size and stretches as --fire-rate drops (size x (2 - fire_rate), "
+                             "e.g. 1.5x size at fire-rate 0.5)")
     parser.add_argument("--max-steps", type=int, default=None,
-                        help="max rollout steps per training epoch; default = 2x --size")
+                        help="max rollout steps per training epoch; default = 2x the min")
     parser.add_argument("--quantize", action="store_true", help="emulate 8-bit visible channels in animation")
     parser.add_argument("--show-hidden", action="store_true", help="also animate hidden channels")
     parser.add_argument("--margin", type=int, default=None,
                          help="blank margin (px) around the target inside the training canvas, "
                               "so growth doesn't rely on wraparound at one exact canvas size; "
                               "default scales with --size (~15%% per side), use 0 for the old edge-to-edge behavior")
-    parser.add_argument("--leak-weight", type=float, default=2,
+    parser.add_argument("--leak-weight", type=float, default=3,
                         help="penalty on hidden-channel activity in the dead margin; "
                              "keeps the pattern from sprouting worm structures into empty "
                              "space on canvases larger than the training grid")
     parser.add_argument("--edge-weight", type=float, default=3,
                         help="weight of the Sobel edge loss; pushes for sharp boundaries "
                              "instead of MSE's blurry average")
+    parser.add_argument("--fft-weight", type=float, default=3,
+                        help="weight of the focal frequency loss: spectrum error re-weighted "
+                             "toward the most-wrong frequencies, recovering the high-frequency "
+                             "detail MSE averages away; 0 disables")
     parser.add_argument("--fg-weight", type=float, default=1.0,
                         help="extra loss weight on the content region relative to the black "
                              "margin, so the easy margin doesn't dilute the image gradient")
-    parser.add_argument("--damage-n", type=int, default=2,
+    parser.add_argument("--damage-n", type=int, default=1,
                         help="pool samples that get a random hole cut each epoch "
                              "(regeneration training — browser users scribble over "
                              "the pattern, so it's on by default); 0 disables")
-    parser.add_argument("--train-gate", choices=("hash", "bernoulli"), default="hash",
+    parser.add_argument("--train-gate", choices=("hash", "bernoulli"), default="bernoulli",
                         help="update gate used during training rollouts when --fire-rate < 1: "
-                             "'hash' replays the browser's deterministic WGSL gate (matches "
-                             "deployment exactly), 'bernoulli' keeps the legacy random gate for A/B")
+                             "'bernoulli' samples a fresh random mask each step (statistically "
+                             "matches the browser's gate, and skips rebuilding the WGSL mask "
+                             "every step), 'hash' replays the browser's exact deterministic gate; "
+                             "the robustness eval always scores with the hash gate either way")
     parser.add_argument("--eval-every", type=int, default=500,
                         help="every N epochs, grow from scratch under deployment conditions "
                              "(bigger canvas, 1-3px seeds) and keep the best-scoring weights; "
@@ -87,7 +106,7 @@ if __name__ == "__main__":
                         help="torch.compile the CA step; numerically identical when it works, "
                              "falls back with a warning where inductor/Triton is unavailable "
                              "(common on Windows)")
-    parser.add_argument("--overflow-weight", type=float, default=0.5,
+    parser.add_argument("--overflow-weight", type=float, default=1,
                         help="penalty on pre-clamp cell values leaving the rule's valid "
                              "range; discourages the model from relying on hard clamping")
     parser.add_argument("--grad-ckpt-steps", type=int, default=64,
@@ -134,6 +153,8 @@ if __name__ == "__main__":
                         fire_rate=args.fire_rate, fg_weight=args.fg_weight,
                         mlp_hidden=args.mlp_hidden, mlp_hidden2=args.mlp_hidden2,
                         mlp_state_input=not args.mlp_no_state_input,
+                        perception_init=args.perception_init,
+                        output_init_std=args.output_init_std,
                         checkpoint_dir=checkpoint_dir,
                         amp=False if args.no_amp else None, compile_step=args.compile)
     arch = (f"mlp_hidden={args.mlp_hidden}"
@@ -158,7 +179,8 @@ if __name__ == "__main__":
 
     trainer.train(epochs=args.epochs, min_steps=args.min_steps, max_steps=args.max_steps,
                   overflow_weight=args.overflow_weight, leak_weight=args.leak_weight,
-                  edge_weight=args.edge_weight, damage_n=args.damage_n,
+                  edge_weight=args.edge_weight, fft_weight=args.fft_weight,
+                  damage_n=args.damage_n,
                   grad_ckpt_steps=args.grad_ckpt_steps, checkpoint_every=args.checkpoint_every,
                   start_epoch=start_epoch, eval_every=args.eval_every, gate=args.train_gate)
     trainer.model.loadBest()

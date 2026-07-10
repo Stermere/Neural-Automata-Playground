@@ -2,6 +2,7 @@
 the update-rule math, the exported WGSL activation code, browser-exact
 quantization, and the stochastic-update gate."""
 import json
+import math
 import os
 
 import torch
@@ -22,6 +23,76 @@ import torch.nn.functional as F
 # produces an export the browser can only load as garbage: the shader clamps
 # to 16 channels while the weight/MLP buffers stay laid out for more.
 PLAYGROUND_MAX_CHANNELS = 16
+
+# Initialization modes for the learned spatial perception convolution. The
+# structured mode gives the optimizer useful local features immediately while
+# keeping every coefficient trainable; random/zeros retain useful A/B
+# baselines for the two architectures' former defaults.
+PERCEPTION_INITIALIZATIONS = ("structured", "random", "zeros")
+
+
+def _init_perception(conv, mode="structured"):
+    """Initialize a square C->C perception conv.
+
+    ``structured`` places one identity, Sobel-X, Sobel-Y, or Laplacian filter
+    on each channel's diagonal connection. Assignments are randomly shuffled
+    but balanced (counts differ by at most one), and off-diagonal connections
+    start at zero. This is the Growing-NCA perception prior adapted to the
+    playground's fixed C-output convolution: unlike fixed paper filters, these
+    weights remain ordinary trainable parameters.
+    """
+    if mode not in PERCEPTION_INITIALIZATIONS:
+        raise ValueError(f"unknown perception_init={mode!r}; expected one of "
+                         f"{PERCEPTION_INITIALIZATIONS}")
+
+    with torch.no_grad():
+        if mode == "zeros":
+            nn.init.zeros_(conv.weight)
+            return
+        if mode == "random":
+            # Match nn.Conv2d.reset_parameters rather than depending on the
+            # random values consumed during module construction.
+            nn.init.kaiming_uniform_(conv.weight, a=math.sqrt(5))
+            return
+
+        out_channels, in_channels, kh, kw = conv.weight.shape
+        if out_channels != in_channels or kh != kw or kh < 3 or kh % 2 == 0:
+            raise ValueError("structured perception requires a square C->C conv "
+                             "with an odd kernel size >= 3")
+
+        identity = torch.zeros(3, 3, dtype=conv.weight.dtype,
+                               device=conv.weight.device)
+        identity[1, 1] = 1.0
+        sobel_x = torch.tensor([[-1., 0., 1.],
+                                [-2., 0., 2.],
+                                [-1., 0., 1.]], dtype=conv.weight.dtype,
+                               device=conv.weight.device) / 8.0
+        sobel_y = sobel_x.t().contiguous()
+        # L1-normalized like Sobel so its initial response scale is comparable.
+        laplacian = torch.tensor([[0., 1., 0.],
+                                  [1., -4., 1.],
+                                  [0., 1., 0.]], dtype=conv.weight.dtype,
+                                 device=conv.weight.device) / 8.0
+        filters = torch.stack((identity, sobel_x, sobel_y, laplacian))
+
+        conv.weight.zero_()
+        assignments = torch.arange(out_channels, device=conv.weight.device) % len(filters)
+        assignments = assignments[torch.randperm(out_channels, device=conv.weight.device)]
+        offset = kh // 2 - 1
+        for channel, filter_idx in enumerate(assignments.tolist()):
+            conv.weight[channel, channel,
+                        offset:offset + 3, offset:offset + 3] = filters[filter_idx]
+
+
+def _init_output_layer(layer, std):
+    """Near-zero random output init: stable updates without blocking gradients."""
+    if std < 0:
+        raise ValueError("output_init_std must be non-negative")
+    if std:
+        nn.init.normal_(layer.weight, mean=0.0, std=std)
+    else:
+        nn.init.zeros_(layer.weight)
+    nn.init.zeros_(layer.bias)
 
 UPDATE_RULES = {
     "linear": {
@@ -190,11 +261,13 @@ class _CAModelBase(nn.Module):
 # none of them need shader changes.
 # ======================================================
 class CAModel(_CAModelBase):
-    def __init__(self, channels=11, kernel_size=5, delta=0.25, rule="tanh", fire_rate=0.5):
+    def __init__(self, channels=11, kernel_size=5, delta=0.25, rule="tanh", fire_rate=0.5,
+                 perception_init="structured"):
         super().__init__(channels, delta, rule, fire_rate)
+        self.perception_init = perception_init
         self.conv = nn.Conv2d(channels, channels, kernel_size,
                               padding=kernel_size // 2, padding_mode='circular', bias=True)
-        nn.init.zeros_(self.conv.weight)
+        _init_perception(self.conv, perception_init)
         nn.init.zeros_(self.conv.bias)
 
     def _conv_out(self, x):
@@ -223,9 +296,12 @@ class CAModel(_CAModelBase):
 # ======================================================
 class MLPCAModel(_CAModelBase):
     def __init__(self, channels=11, hidden_dim=128, kernel_size=5, delta=0.25,
-                 rule="tanh", fire_rate=0.5, state_input=True, hidden_dim2=None):
+                 rule="tanh", fire_rate=0.5, state_input=True, hidden_dim2=None,
+                 perception_init="structured", output_init_std=1e-3):
         super().__init__(channels, delta, rule, fire_rate)
         self.hidden_dim = hidden_dim
+        self.perception_init = perception_init
+        self.output_init_std = output_init_std
         # state_input feeds the cell's own raw state to the MLP alongside the
         # conv outputs (the Growing-NCA identity-filter idea): without it the
         # conv must spend capacity approximating identity kernels just so the
@@ -242,20 +318,19 @@ class MLPCAModel(_CAModelBase):
         # per-channel bias before w1 is absorbed exactly by b1 anyway
         self.conv = nn.Conv2d(channels, channels, kernel_size,
                               padding=kernel_size // 2, padding_mode='circular', bias=False)
+        _init_perception(self.conv, perception_init)
         self.w1 = nn.Conv2d(channels * (2 if state_input else 1), hidden_dim, 1)
-        # zero-init whichever layer is the output layer so the CA starts as
-        # the identity map (the Growing-NCA trick: early rollouts don't
-        # explode); every layer feeding into it keeps its default init so
-        # the MLP has features to select from
+        # A tiny random final layer keeps the CA very close to the identity
+        # map while allowing gradients into perception and hidden layers from
+        # the first optimizer step. Exactly zero final weights block those
+        # gradients until the final layer itself has moved away from zero.
         if self.hidden_dim2:
             self.w2 = nn.Conv2d(hidden_dim, self.hidden_dim2, 1)
             self.w3 = nn.Conv2d(self.hidden_dim2, channels, 1)
-            nn.init.zeros_(self.w3.weight)
-            nn.init.zeros_(self.w3.bias)
+            _init_output_layer(self.w3, output_init_std)
         else:
             self.w2 = nn.Conv2d(hidden_dim, channels, 1)
-            nn.init.zeros_(self.w2.weight)
-            nn.init.zeros_(self.w2.bias)
+            _init_output_layer(self.w2, output_init_std)
 
     def _conv_out(self, x):
         h = self.conv(x)

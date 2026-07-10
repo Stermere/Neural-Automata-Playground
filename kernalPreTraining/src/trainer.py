@@ -63,7 +63,8 @@ class CATrainer:
                  batch_size=8, lr=1e-3, delta=0.25, rule="tanh", margin=None,
                  fire_rate=0.5, fg_weight=3.0, mlp_hidden=128,
                  mlp_state_input=True, mlp_hidden2=None, device=None, checkpoint_dir=None,
-                 amp=None, compile_step=False):
+                 amp=None, compile_step=False, perception_init="structured",
+                 output_init_std=1e-3):
         self.device = device or ('cuda' if torch.cuda.is_available() else 'cpu')
         if 'cuda' in str(self.device):
             # shapes are fixed for a whole run, so letting cudnn benchmark
@@ -95,10 +96,13 @@ class CATrainer:
             self.model = MLPCAModel(channels=channels, hidden_dim=mlp_hidden,
                                     delta=delta, rule=rule, fire_rate=fire_rate,
                                     state_input=mlp_state_input,
-                                    hidden_dim2=mlp_hidden2).to(self.device)
+                                    hidden_dim2=mlp_hidden2,
+                                    perception_init=perception_init,
+                                    output_init_std=output_init_std).to(self.device)
         else:
             self.model = CAModel(channels=channels, delta=delta, rule=rule,
-                                 fire_rate=fire_rate).to(self.device)
+                                 fire_rate=fire_rate,
+                                 perception_init=perception_init).to(self.device)
         self.target_content = load_target_content(img_path, img_size - 2 * self.margin).to(self.device)
         self.target = pad_to_canvas(self.target_content, img_size).unsqueeze(0).to(self.device)
         self.seed = make_seed(channels, img_size).to(self.device)
@@ -131,6 +135,7 @@ class CATrainer:
         sx = torch.tensor([[-1., 0., 1.], [-2., 0., 2.], [-1., 0., 1.]]) / 8.0
         self.sobel = torch.stack([sx, sx.t()]).unsqueeze(1).repeat(3, 1, 1, 1).to(self.device)
         self.target_edges = self._edges(self.target)
+        self.target_fft = torch.fft.fft2(self.target, norm="ortho")
 
         # coordinate grid for cutting circular damage holes
         ys, xs = torch.meshgrid(torch.arange(img_size, dtype=torch.float32),
@@ -158,6 +163,20 @@ class CATrainer:
 
     def _edges(self, rgb):
         return F.conv2d(rgb, self.sobel, padding=1, groups=3)
+
+    def _fft_loss(self, rgb):
+        """Focal frequency loss (Jiang et al. 2021): squared spectrum error,
+        re-weighted by its own detached, per-image-normalized magnitude so the
+        most-wrong frequencies dominate. The weighting is the whole point — by
+        Parseval an unweighted spectrum MSE IS pixel MSE. Where MSE spends its
+        gradient on broad low-frequency agreement, this term concentrates on
+        whichever frequencies remain worst, which late in training is the
+        high-frequency detail that reads as sharpness."""
+        diff = torch.fft.fft2(rgb, norm="ortho") - self.target_fft
+        err = diff.real ** 2 + diff.imag ** 2
+        w = err.sqrt().detach()
+        w = w / w.amax(dim=(-2, -1), keepdim=True).clamp_min(1e-8)
+        return (w * err).mean()
 
     def _damage_sample(self, sample):
         """Zero all channels in a random circle over the content area. The
@@ -205,10 +224,12 @@ class CATrainer:
         return x, overflow
 
     def _compute_loss(self, x, target_batch, target_edges, dead_cells, has_dead_zone,
-                      overflow_total, steps, edge_weight, overflow_weight, leak_weight, distance):
-        """Reconstruction (rgb + Sobel edges, via `distance`) plus the overflow
-        and hidden-leak penalties. Returns (loss, rgb_loss, edge_loss, hidden_leak)
-        so the caller can log the components alongside the combined total."""
+                      overflow_total, steps, edge_weight, fft_weight, overflow_weight,
+                      leak_weight, distance):
+        """Reconstruction (rgb + Sobel edges, via `distance`; focal frequency
+        term when fft_weight > 0) plus the overflow and hidden-leak penalties.
+        Returns (loss, rgb_loss, edge_loss, fft_loss, hidden_leak) so the
+        caller can log the components alongside the combined total."""
         if has_dead_zone:
             hidden_leak = (x[:, 3:] ** 2 * self.dead_mask).sum() \
                 / (dead_cells * (self.channels - 3) * x.shape[0])
@@ -218,13 +239,15 @@ class CATrainer:
         weight_norm = self.pixel_weight.sum() * x.shape[0]
         rgb_loss = (distance(x[:, :3] - target_batch) * self.pixel_weight).sum() / (weight_norm * 3)
         edge_loss = (distance(self._edges(x[:, :3]) - target_edges) * self.pixel_weight).sum() / (weight_norm * 6)
+        fft_loss = self._fft_loss(x[:, :3]) if fft_weight else x.new_zeros(())
 
         loss = rgb_loss \
             + edge_weight * edge_loss \
+            + fft_weight * fft_loss \
             + overflow_weight * overflow_total / steps \
             + leak_weight * hidden_leak
 
-        return loss, rgb_loss, edge_loss, hidden_leak
+        return loss, rgb_loss, edge_loss, fft_loss, hidden_leak
 
     def _eval_and_save_best(self, monitor=None):
         """Probe growth under deployment conditions (bigger canvas, 1-3px
@@ -264,7 +287,9 @@ class CATrainer:
                        "rule": self.model.rule, "fire_rate": self.model.fire_rate,
                        "mlp_hidden": getattr(self.model, "hidden_dim", 0),
                        "mlp_hidden2": getattr(self.model, "hidden_dim2", 0),
-                       "mlp_state_input": getattr(self.model, "state_input", False)},
+                       "mlp_state_input": getattr(self.model, "state_input", False),
+                       "perception_init": getattr(self.model, "perception_init", None),
+                       "output_init_std": getattr(self.model, "output_init_std", None)},
         }, os.path.join(self.checkpoint_dir, f"{stem}.pt"))
 
         if resume_state:
@@ -308,42 +333,54 @@ class CATrainer:
         return ckpt["epoch"]
 
     def train(self, epochs=4000, min_steps=None, max_steps=None,
-              overflow_weight=0.1, leak_weight=0.1, edge_weight=2.0,
-              damage_n=0, grad_ckpt_steps=64, print_every=5, checkpoint_every=1000,
+              overflow_weight=1, leak_weight=1, edge_weight=1.0, fft_weight=2.0,
+              damage_n=1, grad_ckpt_steps=64, print_every=5, checkpoint_every=1000,
               catch_interrupt=True, label=None, loss_fn="mse", start_epoch=0,
-              eval_every=500, gate="hash"):
+              eval_every=500, gate="bernoulli"):
         """catch_interrupt=True swallows Ctrl+C and keeps the best weights
         (interactive use); grid_search passes False so one Ctrl+C can abort
         the whole sweep instead of silently skipping to the next config.
         loss_fn selects the rgb/edge reconstruction distance - one of
-        LOSS_FUNCTIONS ("mse", "l1", "huber"). start_epoch resumes numbering
+        LOSS_FUNCTIONS ("mse", "l1", "huber"). fft_weight scales the focal
+        frequency term (see _fft_loss; 0 disables it). start_epoch resumes numbering
         after load_checkpoint(); the LR schedule always decays fresh, from
         whatever rate the optimizer currently has, over the epochs remaining
         in this call (epochs - start_epoch) — so a new stage with a new lr
         gets its own clean cosine decay rather than continuing the previous
         stage's curve. eval_every runs the robustness probe that selects the
-        best weights (0 defers it to a single probe at the end). gate="hash"
-        rolls out under the browser's deterministic update gate; "bernoulli"
-        keeps the legacy random gate for A/B (moot at fire_rate 1.0)."""
+        best weights (0 defers it to a single probe at the end). gate picks
+        the stochastic-update mask (moot at fire_rate 1.0): "bernoulli"
+        (default) samples a fresh random mask each step — statistically what
+        the browser's hash gate does, without rebuilding the WGSL mask every
+        step; "hash" replays the browser's exact deterministic gate for
+        parity-sensitive A/Bs. The robustness eval always uses the hash gate,
+        so deployment behavior is still what gets scored."""
         distance = LOSS_FUNCTIONS[loss_fn]
         use_hash_gate = gate == "hash" and self.model.fire_rate < 1.0
-        # Information crosses ~2px per step (5x5 kernel), halved by the fire
-        # rate, so the step budget must grow with the canvas: too few steps
-        # and the far side of the pattern can never even be reached, let
-        # alone refined.
+        # Information crosses ~2px per step (5x5 kernel), scaled by the fire
+        # rate, so the step budget must grow with the canvas and stretch as
+        # the fire rate drops: too few steps and the far side of the pattern
+        # can never even be reached, let alone refined. (2 - fire_rate) gives
+        # 1x the canvas at fire_rate 1 and 1.5x at 0.5 — arrival time doubles
+        # there, but the refinement share of the rollout doesn't need to.
         if min_steps is None:
-            min_steps = int(0.5 * self.size)
+            min_steps = round(self.size * (2 - self.model.fire_rate))
         if max_steps is None:
-            max_steps = 2 * self.size
+            max_steps = 2 * min_steps
         damage_n = min(damage_n, self.batch_size - 1)
 
+        # Adam's step size follows lr, not gradient magnitude, so once the
+        # cosine bottoms out the weights keep taking eta_min-sized steps
+        # forever — a 0.1x floor left the whole second half of a run jittering
+        # around the attractor instead of settling into it, which reads as
+        # blur. 0.001x is small enough to actually converge.
         self.scheduler = optim.lr_scheduler.CosineAnnealingLR(
-            self.optimizer, T_max=max(1, epochs - start_epoch), eta_min=self.base_lr * 0.1)
+            self.optimizer, T_max=max(1, epochs - start_epoch), eta_min=self.base_lr * 0.001)
         target_batch = self.target.expand(self.batch_size, -1, -1, -1)
         target_edges = self.target_edges.expand(self.batch_size, -1, -1, -1)
         running = deque(maxlen=50)
         epoch = start_epoch
-        metrics_acc = {"loss": [], "rgb": [], "edge": [], "overflow": [], "leak": []}
+        metrics_acc = {"loss": [], "rgb": [], "edge": [], "fft": [], "overflow": [], "leak": []}
 
 
         # the dead zone is empty when the margin is smaller than the halo
@@ -361,7 +398,7 @@ class CATrainer:
                 f"Rollout {min_steps}-{max_steps} steps/epoch, fire_rate={self.model.fire_rate}, "
                 f"gate={'browser hash' if use_hash_gate else 'bernoulli' if self.model.fire_rate < 1.0 else 'off'}, "
                 f"amp={'bf16' if self.amp else 'off'}, "
-                f"edge_weight={edge_weight}, damage_n={damage_n}, "
+                f"edge_weight={edge_weight}, fft_weight={fft_weight}, damage_n={damage_n}, "
                 f"grad checkpoint segment={grad_ckpt_steps if grad_ckpt_steps else 'off'}, "
                 f"leak zone={'active' if has_dead_zone else 'EMPTY (margin too small, leak penalty off)'}")
             try:
@@ -405,9 +442,10 @@ class CATrainer:
                         remaining -= seg
                         step_base += seg
 
-                    loss, rgb_loss, edge_loss, hidden_leak = self._compute_loss(
+                    loss, rgb_loss, edge_loss, fft_loss, hidden_leak = self._compute_loss(
                         x, target_batch, target_edges, dead_cells, has_dead_zone,
-                        overflow_total, steps, edge_weight, overflow_weight, leak_weight, distance)
+                        overflow_total, steps, edge_weight, fft_weight, overflow_weight,
+                        leak_weight, distance)
 
                     self.optimizer.zero_grad()
                     loss.backward()
@@ -427,6 +465,7 @@ class CATrainer:
                     metrics_acc["loss"].append(loss.item())
                     metrics_acc["rgb"].append(rgb_loss.item())
                     metrics_acc["edge"].append(edge_loss.item())
+                    metrics_acc["fft"].append(fft_loss.item())
                     metrics_acc["overflow"].append((overflow_total / steps).item())
                     metrics_acc["leak"].append(hidden_leak.item())
 
@@ -435,6 +474,7 @@ class CATrainer:
                         avg = {k: sum(v) / len(v) for k, v in metrics_acc.items()}
                         monitor.update(epoch, loss=avg["loss"], smooth=smooth,
                                       rgb=avg["rgb"], edge=avg["edge"],
+                                      fft=avg["fft"],
                                       overflow=avg["overflow"],
                                       leak=avg["leak"],
                                       lr=lr_now, best=self.model.bestEval)

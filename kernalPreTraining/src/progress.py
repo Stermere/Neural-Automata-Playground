@@ -17,6 +17,7 @@ _SERIES = (
     ("edge", "edge loss", "goldenrod"),
     ("overflow", "overflow loss", "blue"),
     ("leak", "hidden leak loss", "red"),
+    ("fft", "focal frequency loss", "orange"),
 )
 
 
