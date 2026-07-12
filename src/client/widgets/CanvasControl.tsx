@@ -8,11 +8,13 @@ interface CanvasControlProps {
   onPause: ((paused: boolean) => void) | undefined;
   onZoomChange: ((zoom: number) => void) | undefined;
   onBrushSizeChange: ((size: number) => void) | undefined;
+  onBrushColorChange: ((color: 'white' | 'black') => void) | undefined;
   disabled?: boolean;
   initialFps?: number;
   initialPaused?: boolean;
   initialZoom?: number;
   initialBrushSize?: number;
+  initialBrushColor?: 'white' | 'black';
 }
 
 export default function CanvasControl({
@@ -22,16 +24,19 @@ export default function CanvasControl({
   onPause,
   onZoomChange,
   onBrushSizeChange,
+  onBrushColorChange,
   disabled = false,
   initialFps = 120,
   initialPaused = false,
   initialZoom = 1.0,
   initialBrushSize = 20,
+  initialBrushColor = 'white',
 }: CanvasControlProps) {
   const [fps, setFps] = useState(initialFps);
   const [isPaused, setIsPaused] = useState(initialPaused);
   const [zoom, setZoom] = useState(initialZoom);
   const [brushSize, setBrushSize] = useState(initialBrushSize);
+  const [brushColor, setBrushColor] = useState<'white' | 'black'>(initialBrushColor);
 
   useEffect(() => {
     setZoom(initialZoom)
@@ -59,6 +64,12 @@ export default function CanvasControl({
     const newBrushSize = parseFloat(event.target.value);
     setBrushSize(newBrushSize)
     onBrushSizeChange?.(newBrushSize);
+  };
+
+  const handleBrushColorToggle = () => {
+    const newBrushColor = brushColor === 'white' ? 'black' : 'white';
+    setBrushColor(newBrushColor);
+    onBrushColorChange?.(newBrushColor);
   };
 
   return (
@@ -130,6 +141,15 @@ export default function CanvasControl({
           disabled={disabled}
           className={styles.slider}
         />
+        <button
+          type="button"
+          className={`${styles.btn} ${brushColor === 'white' ? styles.brushWhite : styles.brushBlack}`}
+          onClick={handleBrushColorToggle}
+          disabled={disabled}
+          aria-label={`Brush color: ${brushColor}. Click to paint ${brushColor === 'white' ? 'black' : 'white'}.`}
+        >
+          Brush: {brushColor === 'white' ? 'White' : 'Black'}
+        </button>
       </div>
     </div>
   );

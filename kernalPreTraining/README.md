@@ -92,6 +92,9 @@ Without `-y` you'll be prompted `Save pattern? ` after training finishes.
 | `--steps` | `400` | Number of steps to animate after training |
 | `--quantize` | off | Round visible channels to 8-bit each animation step, emulating the browser's texture format |
 | `--show-hidden` | off | Also animate the 8 hidden memory channels as grayscale panels |
+| `--no-cuda-graph` | off | Disable automatic CUDA Graph acceleration (mainly useful for debugging or very low-VRAM runs) |
+| `--compile` | off | Compile fixed rollout segments with Inductor/Triton; measured ~2.3x at 150px with full BPTT |
+| `--bptt-steps` | full rollout | Backpropagate only through the final N simulated steps; `16` combined with compilation measured >5x at 150px, with a shorter gradient horizon |
 | `--margin` | ~15% of `--size` | Blank border (px) around the target inside the training canvas, so growth learns to stay clear of the training edge instead of relying on wraparound at that one exact size — this is what lets the kernel reproduce correctly on a browser canvas of a different size. Use `0` for the old edge-to-edge behavior |
 | `-y`, `--export` | off | Export without the interactive prompt |
 
@@ -106,6 +109,12 @@ kernalPreTraining/.venv/Scripts/python.exe kernalPreTraining/src/Train.py --epoc
 
 # train on a different image, inspect hidden channels + quantization
 kernalPreTraining/.venv/Scripts/python.exe kernalPreTraining/src/Train.py --image kernalPreTraining/trainingImages/Wave.png --show-hidden --quantize -y
+
+# 150px, semantics-preserving fusion (full gradient history; ~2.3x measured)
+kernalPreTraining/.venv/Scripts/python.exe kernalPreTraining/src/Train.py --size 150 --compile --grad-ckpt-steps 16 -y
+
+# 150px maximum-throughput mode (~5.34x measured; gradients cover final 16 steps)
+kernalPreTraining/.venv/Scripts/python.exe kernalPreTraining/src/Train.py --size 150 --compile --grad-ckpt-steps 16 --bptt-steps 16 -y
 ```
 
 ## Grid search
@@ -170,6 +179,36 @@ playground) load exactly as before.
 
 ## Notes
 
+- CUDA training uses channels-last tensor storage, which improved a measured
+  150px/16-channel rollout on an RTX 3070 from **68 to 123 steps/s (1.81x)**.
+  It also captures rollout, loss, backward, and gradient normalization in one
+  reusable CUDA Graph whenever that graph fits the current card. At startup the
+  trainer measures two short real backward passes for the exact canvas, batch,
+  architecture, AMP mode, and GPU; it extrapolates activation memory to the
+  maximum rollout, adds capture overhead, and compares it with live free VRAM
+  after reserving headroom. Small launch-bound grids benefit most: the default
+  32px/16-channel CLI architecture improved from **5.35 to 40.64 training
+  epochs/s (7.60x)** in a 48-step steady-state benchmark. A 150px/450-step
+  rollout was estimated at about 31GB on the 8GB test card, so it automatically
+  keeps gradient checkpointing instead. Different cards/configurations make
+  their own measured decision. Capture failures also fall back safely, and
+  `--no-cuda-graph` forces the eager/checkpointed path. Exact browser-hash
+  training stays eager; the default statistically-equivalent Bernoulli gate is
+  graph accelerated when memory permits.
+- Large-canvas Inductor/Triton compilation works at the **rollout-segment**
+  level, not one CA step at a time. That exposes recurrent elementwise work to
+  fusion while fixed 16-step specializations avoid recompiling every random
+  rollout length. On the 150px/16-channel RTX 3070 benchmark, compiled full
+  BPTT reduced a 96-step training operation by about 2.3x without changing its
+  math. The opt-in `--bptt-steps 16` mode still simulates and quantizes all 96
+  forward steps but detaches the earlier trajectory, so only the final 16 steps
+  contribute gradients. Combined with `--compile --grad-ckpt-steps 16`, this
+  reduced the same operation from **1.095s to 0.205s (5.34x)**, including loss,
+  backward, gradient normalization, and Adam. This changes optimization—not
+  the exported architecture or forward CA behavior—and may weaken learning of
+  very long-term credit assignment. Compare robustness scores against a full-
+  BPTT run; a good compromise is fast TBPTT pretraining followed by a shorter
+  full-BPTT (`--compile` without `--bptt-steps`) fine-tuning stage.
 - Training reseeds with a randomized dab (a 1-5px blob with a touch of
   value noise) so the kernel tolerates the imprecision of a real
   brush click, not just a mathematically perfect single pixel. The default

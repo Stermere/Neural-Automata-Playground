@@ -1,9 +1,10 @@
 """Trainer: Growing-NCA recipe — grow the target image from a seed,
 sample pool for long-term persistence, damage for regeneration."""
+import gc
 import os
 import random
 import time
-from collections import deque
+from typing import cast
 
 import matplotlib.pyplot as plt
 import torch
@@ -63,7 +64,7 @@ class CATrainer:
                  batch_size=8, lr=1e-3, delta=0.25, rule="tanh", margin=None,
                  fire_rate=0.5, fg_weight=3.0, mlp_hidden=128,
                  mlp_state_input=True, mlp_hidden2=None, device=None, checkpoint_dir=None,
-                 amp=None, compile_step=False, perception_init="structured",
+                 amp=None, compile_step=False, cuda_graph=None, perception_init="structured",
                  output_init_std=1e-3):
         self.device = device or ('cuda' if torch.cuda.is_available() else 'cpu')
         if 'cuda' in str(self.device):
@@ -76,6 +77,12 @@ class CATrainer:
         self.amp = amp if amp is not None else (
             'cuda' in str(self.device)
             and torch.cuda.is_available() and torch.cuda.is_bf16_supported())
+        # Small NCA grids are launch-bound: Python spends much longer issuing
+        # their thousands of tiny kernels than the GPU spends executing them.
+        # None selects the fast path automatically once the rollout dimensions
+        # are known in train(). True forces a capture attempt and False is the
+        # escape hatch for debugging or memory-constrained runs.
+        self.cuda_graph = cuda_graph
         image_name = os.path.splitext(os.path.basename(img_path))[0]
         self.checkpoint_dir = checkpoint_dir or os.path.join(
             checkpoints_root, f"{image_name}_{time.strftime('%Y%m%d-%H%M%S')}")
@@ -103,10 +110,19 @@ class CATrainer:
             self.model = CAModel(channels=channels, delta=delta, rule=rule,
                                  fire_rate=fire_rate,
                                  perception_init=perception_init).to(self.device)
+        # NHWC/channels-last lets cuDNN use substantially faster tensor-core
+        # convolution paths on large grids (about 1.8x at 150px on RTX 3070).
+        # Tensor dimensions remain [N,C,H,W]; only their memory layout changes.
+        self.memory_format = (torch.channels_last if 'cuda' in str(self.device)
+                              else torch.contiguous_format)
+        if self.memory_format == torch.channels_last:
+            self.model.to(memory_format=self.memory_format)
         self.target_content = load_target_content(img_path, img_size - 2 * self.margin).to(self.device)
         self.target = pad_to_canvas(self.target_content, img_size).unsqueeze(0).to(self.device)
-        self.seed = make_seed(channels, img_size).to(self.device)
-        self.pool = make_seed(channels, img_size, batch=self.pool_size).to(self.device)
+        self.seed = make_seed(channels, img_size).to(self.device).contiguous(
+            memory_format=self.memory_format)
+        self.pool = make_seed(channels, img_size, batch=self.pool_size).to(self.device).contiguous(
+            memory_format=self.memory_format)
         self.dead_mask = self._make_dead_mask().to(self.device)
 
         if compile_step:
@@ -147,6 +163,7 @@ class CATrainer:
         self.optimizer = optim.Adam(self.model.parameters(), lr=lr, betas=(0.5, 0.95))
         self.scheduler = None  # created in train() once epochs is known
         self.last_eval = None  # latest robustness-probe score (see _eval_and_save_best)
+        self._gate_bases = {}
 
     def _make_dead_mask(self, halo=6):
         """1.0 in the margin far from the target content, 0.0 over the content
@@ -189,6 +206,27 @@ class CATrainer:
         hole = (self.grid_x - cx) ** 2 + (self.grid_y - cy) ** 2 <= r * r
         sample[:, hole] = 0.0
 
+    def _gate_base(self, width, height):
+        """Cache the spatial half of the browser gate hash."""
+        key = (width, height, str(self.device))
+        base = self._gate_bases.get(key)
+        if base is None:
+            xs = torch.arange(width, dtype=torch.int64, device=self.device).view(1, -1)
+            ys = torch.arange(height, dtype=torch.int64, device=self.device).view(-1, 1)
+            base = (xs * 374761393 + ys * 668265263) & 0xFFFFFFFF
+            self._gate_bases[key] = base
+        return base
+
+    def _gate_mask(self, width, height, timestep):
+        """wgsl_gate_mask(), using a cached spatial hash base."""
+        if self.model.fire_rate >= 1.0:
+            return None
+        h = (self._gate_base(width, height) + int(timestep) * 2246822519) & 0xFFFFFFFF
+        h = ((h ^ (h >> 13)) * 1274126177) & 0xFFFFFFFF
+        h = h ^ (h >> 16)
+        gate = h.to(torch.float32) / 4294967295.0
+        return (gate < self.model.fire_rate).view(1, 1, height, width).to(torch.float32)
+
     def _rollout_chunk(self, x, steps, gate_t0=None, step_base=0):
         """One backprop segment of a rollout: step, then round the visible
         channels like the browser's rgba8unorm texture does. Kept small so it
@@ -211,8 +249,7 @@ class CATrainer:
             mask = None
             if gate_t0 is not None:
                 mask = torch.cat([
-                    wgsl_gate_mask(size, size, int(t) + step_base + i,
-                                   self.model.fire_rate, device=x.device)
+                    self._gate_mask(size, size, int(t) + step_base + i)
                     for t in gate_t0])
             if self.amp:
                 with torch.autocast('cuda', dtype=torch.bfloat16):
@@ -222,6 +259,135 @@ class CATrainer:
             x = quantize_visible(x.float())
             overflow = overflow + ov.float()
         return x, overflow
+
+    def _rollout_graph(self, x, requested_steps, max_steps):
+        """Fixed-shape rollout for CUDA Graph capture.
+
+        The graph contains ``max_steps`` calls. A device scalar makes calls
+        after ``requested_steps`` no-ops for state, overflow, and gradients,
+        retaining random rollout lengths without maintaining many graphs.
+        """
+        overflow = x.new_zeros(())
+        for i in range(max_steps):
+            if self.amp:
+                with torch.autocast('cuda', dtype=torch.bfloat16):
+                    candidate, ov = self.model.step(x)
+            else:
+                candidate, ov = self.model.step(x)
+            candidate = quantize_visible(candidate.float())
+            active = requested_steps > i
+            x = torch.where(active, candidate, x)
+            overflow = overflow + ov.float() * active.to(ov.dtype)
+        return x, overflow
+
+    def _make_train_graph(self, max_steps, target_batch, target_edges,
+                          dead_cells, has_dead_zone, edge_weight, fft_weight,
+                          overflow_weight, leak_weight, distance):
+        """Capture rollout, loss, backward, and gradient normalization.
+
+        Adam remains outside the graph, preserving optimizer checkpoint and
+        LR-scheduler behavior while removing the dominant launch overhead.
+        """
+        # Valid initial values keep warmup/capture losses finite even though
+        # callers overwrite this buffer before every replay.
+        static_x = self.seed.expand(self.batch_size, -1, -1, -1).clone()
+        static_steps = torch.full((), max_steps, dtype=torch.int64, device=self.device)
+        outputs = None
+
+        def body():
+            nonlocal outputs
+            for p in self.model.parameters():
+                if p.grad is not None:
+                    p.grad.zero_()
+            x, overflow_total = self._rollout_graph(static_x, static_steps, max_steps)
+            loss_parts = self._compute_loss(
+                x, target_batch, target_edges, dead_cells, has_dead_zone,
+                overflow_total, static_steps, edge_weight, fft_weight,
+                overflow_weight, leak_weight, distance)
+            loss_parts[0].backward()
+            for p in self.model.parameters():
+                if p.grad is not None:
+                    p.grad.div_(p.grad.norm() + 1e-8)
+            outputs = (x, overflow_total, *loss_parts)
+
+        # Warm up on the current stream. In particular, this creates each
+        # parameter's AccumulateGrad node on the same stream lineage used by
+        # capture; warming on a separate stream can make the legacy stream
+        # depend on a blocking capture stream during backward.
+        for _ in range(2):
+            body()
+        torch.cuda.synchronize()
+        # ``outputs`` contains tensors with grad_fn links into the last warmup
+        # graph. Keeping that graph alive while capture starts causes its old
+        # AccumulateGrad nodes to introduce an illegal cross-stream dependency.
+        outputs = None
+        gc.collect()
+
+        graph = torch.cuda.CUDAGraph()
+        with torch.cuda.graph(graph):
+            body()
+        assert outputs is not None
+        return graph, static_x, static_steps, cast(tuple, outputs)
+
+    def _cuda_graph_fits(self, max_steps, target_batch, target_edges,
+                         dead_cells, has_dead_zone, edge_weight, fft_weight,
+                         overflow_weight, leak_weight, distance):
+        """Measure this exact workload's activation-memory slope and decide
+        whether a full max-length CUDA Graph fits the currently free VRAM.
+
+        A formula based only on H/W/channels misses cuDNN workspaces, AMP,
+        architecture details, allocator behavior, and other GPU users. Two
+        short real forward/backward samples include all of those. Activation
+        memory is approximately linear in rollout length, so extrapolating
+        their slope is both cheap and much more portable across systems.
+        """
+        sample_steps = (2, 6)
+        measurements = []
+        x = self.seed.expand(self.batch_size, -1, -1, -1).clone()
+        try:
+            for steps in sample_steps:
+                self.optimizer.zero_grad(set_to_none=True)
+                torch.cuda.empty_cache()
+                gc.collect()
+                baseline = torch.cuda.memory_allocated(self.device)
+                torch.cuda.reset_peak_memory_stats(self.device)
+                y, overflow = self._rollout_chunk(x, steps)
+                losses = self._compute_loss(
+                    y, target_batch, target_edges, dead_cells, has_dead_zone,
+                    overflow, steps, edge_weight, fft_weight, overflow_weight,
+                    leak_weight, distance)
+                losses[0].backward()
+                torch.cuda.synchronize(self.device)
+                extra = torch.cuda.max_memory_allocated(self.device) - baseline
+                measurements.append((steps, extra))
+                del y, overflow, losses
+
+            (s0, m0), (s1, m1) = measurements
+            per_step = max(0.0, (m1 - m0) / (s1 - s0))
+            fixed = max(0.0, m0 - per_step * s0)
+            # Capture has private-pool bookkeeping and can choose slightly
+            # different cuDNN workspaces, so pad the observed eager estimate.
+            estimated = int((fixed + per_step * max_steps) * 1.25)
+        except (torch.OutOfMemoryError, RuntimeError) as e:
+            self.optimizer.zero_grad(set_to_none=True)
+            torch.cuda.empty_cache()
+            return False, f"probe failed: {type(e).__name__}"
+        finally:
+            del x
+            self.optimizer.zero_grad(set_to_none=True)
+            torch.cuda.empty_cache()
+            gc.collect()
+
+        free, total = torch.cuda.mem_get_info(self.device)
+        # Leave room for the persistent pool, Adam updates, robustness probes,
+        # display use, and allocator fragmentation after capture.
+        reserve = max(1 << 30, int(total * 0.15))
+        available = max(0, free - reserve)
+        fits = estimated <= available
+        gib = 1 << 30
+        detail = (f"estimated {estimated / gib:.2f}GB, "
+                  f"available {available / gib:.2f}GB after reserve")
+        return fits, detail
 
     def _compute_loss(self, x, target_batch, target_edges, dead_cells, has_dead_zone,
                       overflow_total, steps, edge_weight, fft_weight, overflow_weight,
@@ -321,7 +487,8 @@ class CATrainer:
         if os.path.exists(state_path):
             state = torch.load(state_path, map_location=self.device)
             if state["pool"].shape == self.pool.shape:
-                self.pool = state["pool"].to(self.device)
+                self.pool = state["pool"].to(self.device).contiguous(
+                    memory_format=self.memory_format)
                 if state.get("bestEval") is not None:
                     self.model.bestEval = state["bestEval"]
                     if state.get("best_weights") is not None:
@@ -336,7 +503,8 @@ class CATrainer:
               overflow_weight=1, leak_weight=1, edge_weight=1.0, fft_weight=2.0,
               damage_n=1, grad_ckpt_steps=64, print_every=5, checkpoint_every=1000,
               catch_interrupt=True, label=None, loss_fn="mse", start_epoch=0,
-              eval_every=500, gate="bernoulli"):
+              eval_every=500, gate="bernoulli", compile_rollout=False,
+              bptt_steps=None):
         """catch_interrupt=True swallows Ctrl+C and keeps the best weights
         (interactive use); grid_search passes False so one Ctrl+C can abort
         the whole sweep instead of silently skipping to the next config.
@@ -368,6 +536,25 @@ class CATrainer:
         if max_steps is None:
             max_steps = 2 * min_steps
         damage_n = min(damage_n, self.batch_size - 1)
+        if bptt_steps is not None and bptt_steps <= 0:
+            raise ValueError("bptt_steps must be positive or None")
+
+        # Compile one fixed-size rollout segment instead of model.step. This
+        # lets Inductor/Triton fuse elementwise work across recurrent steps.
+        # Internal cudagraphs are disabled because checkpointing invokes the
+        # same compiled callable repeatedly while earlier outputs remain live.
+        compiled_chunk = None
+        compile_detail = "off"
+        compile_segment = grad_ckpt_steps or (bptt_steps or 16)
+        if compile_rollout and 'cuda' in str(self.device):
+            try:
+                compiled_chunk = torch.compile(
+                    self._rollout_chunk, fullgraph=True,
+                    options={"triton.cudagraphs": False})
+                compile_detail = f"on ({compile_segment}-step segments)"
+            except Exception as e:
+                compile_detail = f"failed: {type(e).__name__}"
+                print(f"Rollout compilation failed ({e!r}); continuing eagerly")
 
         # Adam's step size follows lr, not gradient magnitude, so once the
         # cosine bottoms out the weights keep taking eta_min-sized steps
@@ -378,9 +565,16 @@ class CATrainer:
             self.optimizer, T_max=max(1, epochs - start_epoch), eta_min=self.base_lr * 0.001)
         target_batch = self.target.expand(self.batch_size, -1, -1, -1)
         target_edges = self.target_edges.expand(self.batch_size, -1, -1, -1)
-        running = deque(maxlen=50)
         epoch = start_epoch
-        metrics_acc = {"loss": [], "rgb": [], "edge": [], "fft": [], "overflow": [], "leak": []}
+        metric_names = ("loss", "rgb", "edge", "fft", "overflow", "leak")
+        # Keep metrics device-side between reports. The former six .item()
+        # calls every epoch synchronized graph replay with the CPU and erased
+        # much of the launch-overhead win.
+        metrics_acc = torch.zeros(len(metric_names), device=self.device)
+        metrics_count = 0
+        running_values = torch.zeros(50, device=self.device)
+        running_count = 0
+        running_pos = 0
 
 
         # the dead zone is empty when the margin is smaller than the halo
@@ -392,18 +586,47 @@ class CATrainer:
         title = label or os.path.basename(self.checkpoint_dir)
         monitor = TrainingMonitor(epochs, title=title)
 
+        # A full graph retains the maximum rollout's activation storage. In
+        # auto mode, measure this exact model/GPU workload and capture whenever
+        # it fits rather than relying on a card- or architecture-specific limit.
+        graph_detail = "disabled"
+        if (self.cuda_graph and 'cuda' in str(self.device)
+                and not use_hash_gate and bptt_steps is None and compiled_chunk is None):
+            use_cuda_graph, graph_detail = self._cuda_graph_fits(
+                max_steps, target_batch, target_edges, dead_cells, has_dead_zone,
+                edge_weight, fft_weight, overflow_weight, leak_weight, distance)
+        else:
+            use_cuda_graph = bool(self.cuda_graph) and compiled_chunk is None
+            if use_cuda_graph:
+                graph_detail = "forced"
+        graph_state = None
+        if use_cuda_graph and not use_hash_gate:
+            try:
+                graph_state = self._make_train_graph(
+                    max_steps, target_batch, target_edges, dead_cells, has_dead_zone,
+                    edge_weight, fft_weight, overflow_weight, leak_weight, distance)
+            except Exception as e:
+                graph_state = None
+                torch.cuda.empty_cache()
+                graph_detail = f"capture failed: {type(e).__name__}"
+                print(f"CUDA Graph capture failed ({e!r}); continuing eagerly")
+
         interrupted = False
         with monitor:
             monitor.note(
                 f"Rollout {min_steps}-{max_steps} steps/epoch, fire_rate={self.model.fire_rate}, "
                 f"gate={'browser hash' if use_hash_gate else 'bernoulli' if self.model.fire_rate < 1.0 else 'off'}, "
                 f"amp={'bf16' if self.amp else 'off'}, "
+                f"cuda_graph={'on' if graph_state is not None else 'off'} ({graph_detail}), "
+                f"compile={compile_detail}, "
+                f"bptt={'full' if bptt_steps is None else f'last {bptt_steps} steps'}, "
+                f"layout={'channels_last' if self.memory_format == torch.channels_last else 'contiguous'}, "
                 f"edge_weight={edge_weight}, fft_weight={fft_weight}, damage_n={damage_n}, "
                 f"grad checkpoint segment={grad_ckpt_steps if grad_ckpt_steps else 'off'}, "
                 f"leak zone={'active' if has_dead_zone else 'EMPTY (margin too small, leak penalty off)'}")
             try:
                 for epoch in range(start_epoch, epochs):
-                    idx = torch.randint(0, self.pool_size, (self.batch_size,))
+                    idx = torch.randint(0, self.pool_size, (self.batch_size,), device=self.device)
                     x = self.pool[idx]
 
                     # reseed the worst-looking sample so growth from seed keeps training;
@@ -412,81 +635,126 @@ class CATrainer:
                     # just a perfect pixel
                     with torch.no_grad():
                         per_sample = ((x[:, :3] - target_batch) ** 2).mean(dim=(1, 2, 3))
-                    radius = random.choices([0, 1, 2], weights=[0.6, 0.3, 0.1])[0]
-                    reseed = make_seed(self.channels, self.size, radius=radius,
-                                       noise=random.uniform(0.0, 0.05)).to(self.device)
-                    worst = per_sample.argmax().item()
-                    x[worst] = reseed[0]
-
                     # cut holes in the best-grown samples so regrowth keeps training
-                    for i in per_sample.argsort()[:damage_n].tolist():
-                        if i != worst:
-                            self._damage_sample(x[i])
+                    if damage_n:
+                        damage_idx = per_sample.topk(damage_n, largest=False).indices
+                        radii = (0.08 + 0.17 * torch.rand(damage_n, 1, 1, device=self.device)) * self.size
+                        cxs = self.margin + (self.size - 2 * self.margin) * torch.rand(
+                            damage_n, 1, 1, device=self.device)
+                        cys = self.margin + (self.size - 2 * self.margin) * torch.rand(
+                            damage_n, 1, 1, device=self.device)
+                        holes = ((self.grid_x - cxs) ** 2 + (self.grid_y - cys) ** 2
+                                 <= radii ** 2)
+                        x[damage_idx] *= (~holes).unsqueeze(1)
+
+                    radius = random.choices([0, 1, 2], weights=[0.6, 0.3, 0.1])[0]
+                    noise = random.uniform(0.0, 0.05)
+                    reseed = torch.zeros_like(x[:1])
+                    c = self.size // 2
+                    reseed[:, :, c - radius:c + radius + 1,
+                           c - radius:c + radius + 1] = 1.0
+                    if noise:
+                        reseed.add_(noise * torch.randn_like(reseed)).clamp_(0.0, 1.0)
+                    worst = per_sample.argmax()
+                    x[worst] = reseed[0]
 
                     # random per-sample offsets into the hash gate's timestep
                     # sequence, so every epoch sees a different stretch of the
                     # exact update pattern the browser will replay
                     gate_t0 = torch.randint(0, 2 ** 30, (self.batch_size,)) if use_hash_gate else None
                     steps = random.randint(min_steps, max_steps)
-                    overflow_total = x.new_zeros(())
-                    remaining = steps
-                    step_base = 0
-                    while remaining > 0:
-                        seg = min(grad_ckpt_steps, remaining) if grad_ckpt_steps else remaining
-                        if grad_ckpt_steps:
-                            x, ov = grad_checkpoint(self._rollout_chunk, x, seg, gate_t0,
-                                                    step_base, use_reentrant=False)
+                    if graph_state is not None:
+                        graph, static_x, static_steps, graph_outputs = graph_state
+                        static_x.copy_(x)
+                        static_steps.fill_(steps)
+                        graph.replay()
+                        (x, overflow_total, loss, rgb_loss, edge_loss,
+                         fft_loss, hidden_leak) = graph_outputs
+                    else:
+                        overflow_total = x.new_zeros(())
+
+                        def run_segments(state, count, base, track_grad):
+                            segment_overflow = state.new_zeros(())
+                            remaining = count
+                            while remaining > 0:
+                                # Only call the compiled function at its fixed
+                                # specialization. A short final remainder stays
+                                # eager, avoiding up to N recompilations for
+                                # random rollout lengths.
+                                if compiled_chunk is not None and remaining >= compile_segment:
+                                    seg = compile_segment
+                                    rollout_fn = compiled_chunk
+                                else:
+                                    seg = (min(grad_ckpt_steps, remaining)
+                                           if grad_ckpt_steps else remaining)
+                                    rollout_fn = self._rollout_chunk
+                                if track_grad and grad_ckpt_steps:
+                                    state, ov = grad_checkpoint(
+                                        rollout_fn, state, seg, gate_t0, base,
+                                        use_reentrant=False)
+                                else:
+                                    state, ov = rollout_fn(state, seg, gate_t0, base)
+                                segment_overflow = segment_overflow + ov
+                                remaining -= seg
+                                base += seg
+                            return state, segment_overflow
+
+                        if bptt_steps is not None and steps > bptt_steps:
+                            prefix = steps - bptt_steps
+                            with torch.no_grad():
+                                x, prefix_overflow = run_segments(x, prefix, 0, False)
+                            x, grad_overflow = run_segments(x, bptt_steps, prefix, True)
+                            overflow_total = prefix_overflow + grad_overflow
                         else:
-                            x, ov = self._rollout_chunk(x, seg, gate_t0, step_base)
-                        overflow_total = overflow_total + ov
-                        remaining -= seg
-                        step_base += seg
+                            x, overflow_total = run_segments(x, steps, 0, True)
 
-                    loss, rgb_loss, edge_loss, fft_loss, hidden_leak = self._compute_loss(
-                        x, target_batch, target_edges, dead_cells, has_dead_zone,
-                        overflow_total, steps, edge_weight, fft_weight, overflow_weight,
-                        leak_weight, distance)
+                        loss, rgb_loss, edge_loss, fft_loss, hidden_leak = self._compute_loss(
+                            x, target_batch, target_edges, dead_cells, has_dead_zone,
+                            overflow_total, steps, edge_weight, fft_weight, overflow_weight,
+                            leak_weight, distance)
 
-                    self.optimizer.zero_grad()
-                    loss.backward()
-                    for p in self.model.parameters():
-                        if p.grad is not None:
-                            p.grad /= (p.grad.norm() + 1e-8)
+                        self.optimizer.zero_grad(set_to_none=True)
+                        loss.backward()
+                        for p in self.model.parameters():
+                            if p.grad is not None:
+                                p.grad.div_(p.grad.norm() + 1e-8)
                     self.optimizer.step()
                     self.scheduler.step()
 
                     self.pool[idx] = x.detach()
 
-                    running.append(loss.item())
-                    smooth = sum(running) / len(running)
-
-                    # accumulate every epoch's raw metrics; averaged over the
-                    # window and flushed
-                    metrics_acc["loss"].append(loss.item())
-                    metrics_acc["rgb"].append(rgb_loss.item())
-                    metrics_acc["edge"].append(edge_loss.item())
-                    metrics_acc["fft"].append(fft_loss.item())
-                    metrics_acc["overflow"].append((overflow_total / steps).item())
-                    metrics_acc["leak"].append(hidden_leak.item())
+                    detached_metrics = torch.stack((
+                        loss.detach(), rgb_loss.detach(), edge_loss.detach(),
+                        fft_loss.detach(), (overflow_total / steps).detach(),
+                        hidden_leak.detach()))
+                    metrics_acc.add_(detached_metrics)
+                    metrics_count += 1
+                    running_values[running_pos].copy_(loss.detach())
+                    running_pos = (running_pos + 1) % len(running_values)
+                    running_count = min(running_count + 1, len(running_values))
 
                     if epoch % print_every == 0:
                         lr_now = self.optimizer.param_groups[0]['lr']
-                        avg = {k: sum(v) / len(v) for k, v in metrics_acc.items()}
+                        avg_values = (metrics_acc / metrics_count).cpu().tolist()
+                        avg = dict(zip(metric_names, avg_values))
+                        smooth = running_values[:running_count].mean().item()
                         monitor.update(epoch, loss=avg["loss"], smooth=smooth,
                                       rgb=avg["rgb"], edge=avg["edge"],
                                       fft=avg["fft"],
                                       overflow=avg["overflow"],
                                       leak=avg["leak"],
                                       lr=lr_now, best=self.model.bestEval)
-                        for v in metrics_acc.values():
-                            v.clear()
+                        metrics_acc.zero_()
+                        metrics_count = 0
 
 
                     if eval_every and epoch > start_epoch and epoch % eval_every == 0:
                         self._eval_and_save_best(monitor)
 
                     if checkpoint_every and epoch > 0 and epoch % checkpoint_every == 0:
-                        self.save_checkpoint(epoch, self.last_eval if self.last_eval is not None else smooth)
+                        checkpoint_score = (self.last_eval if self.last_eval is not None
+                                            else running_values[:running_count].mean().item())
+                        self.save_checkpoint(epoch, checkpoint_score)
                         monitor.note(f"Checkpoint saved: {self.checkpoint_dir}/epoch_{epoch:06d}.pt")
 
             except KeyboardInterrupt:
@@ -527,17 +795,21 @@ class CATrainer:
             dead[max(0, m - halo):m + content_size + halo,
                  max(0, m - halo):m + content_size + halo] = 0.0
             dead = dead.to(self.device)
-            for radius in radii:
-                seed = make_seed(self.channels, canvas_size, radius=radius).to(self.device)
-                with torch.no_grad():
-                    x = seed
-                    for t in range(steps):
-                        mask = wgsl_gate_mask(canvas_size, canvas_size, t,
-                                              self.model.fire_rate, device=self.device)
-                        x, _ = self.model.step(x, update_mask=mask)
-                        x = quantize_visible(x)
-                    leak = (x[0, 3:] * dead).abs().max().item()
-                mse = F.mse_loss(x[0, :3].cpu(), tgt).item()
+            seed = torch.cat([make_seed(self.channels, canvas_size, radius=radius)
+                              for radius in radii]).to(self.device).contiguous(
+                                  memory_format=self.memory_format)
+            with torch.no_grad():
+                x = seed
+                for t in range(steps):
+                    mask = self._gate_mask(canvas_size, canvas_size, t)
+                    x, _ = self.model.step(x, update_mask=mask)
+                    x = quantize_visible(x)
+                leaks = (x[:, 3:] * dead).abs().flatten(1).amax(1).cpu().tolist()
+                # Preserve the legacy CPU reduction's exact reported values;
+                # only the expensive CA rollout is batched on the GPU.
+                rgb_cpu = x[:, :3].cpu()
+                mses = [F.mse_loss(rgb, tgt).item() for rgb in rgb_cpu]
+            for radius, mse, leak in zip(radii, mses, leaks):
                 results.append({"canvas": canvas_size, "seed_radius": radius,
                                 "mse": mse, "leak": leak})
                 if verbose:

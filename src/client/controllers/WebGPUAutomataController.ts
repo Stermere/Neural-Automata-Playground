@@ -50,6 +50,7 @@ export class WebGPUNeuralAutomataController {
   private animationId = 0;
   private drawing = false;
   private brushRadius: number;
+  private brushColor: 'white' | 'black' = 'white';
 
   private baseShaderCode = computeShaderCode;
   private activationCode = BASE_ACTIVATIONS["Exponential Linear Unit"];
@@ -317,6 +318,18 @@ export class WebGPUNeuralAutomataController {
 
   setBrushSize(size: number): void {
     this.brushRadius = Math.max(0, size - 1);
+  }
+
+  setBrushColor(color: 'white' | 'black'): void {
+    this.brushColor = color;
+  }
+
+  seedCenterDot(): void {
+    this.clearCanvas();
+    const previousBrushRadius = this.brushRadius;
+    this.brushRadius = 0;
+    this.paintCell(Math.floor(this.gridSize[0] / 2), Math.floor(this.gridSize[1] / 2));
+    this.brushRadius = previousBrushRadius;
   }
 
   togglePaused(paused: boolean): void {
@@ -669,7 +682,14 @@ export class WebGPUNeuralAutomataController {
       this.brushBufferHeight = height;
     }
     const pixels = this.brushPixelBuffer;
-    pixels.fill(255);
+    const brushValue = this.brushColor === 'white' ? 255 : 0;
+    pixels.fill(brushValue);
+    // Keep the brush opaque when painting black.
+    if (brushValue === 0) {
+      for (let i = 3; i < pixels.length; i += 4) {
+        pixels[i] = 255;
+      }
+    }
     
     this.device.queue.writeTexture(
       { texture: this.texA, origin: [minX, minY, 0] },
@@ -684,13 +704,14 @@ export class WebGPUNeuralAutomataController {
       [width, height, 1]
     );
 
-    // The brush paints hidden channels to 1.0, matching the visible channels
+    // Keep hidden channels consistent with the selected visible brush color.
     const hiddenCount = this.channelCount - VISIBLE_CHANNELS;
     if (hiddenCount > 0) {
       const rowFloats = width * hiddenCount;
       if (!this.brushHiddenRow || this.brushHiddenRow.length !== rowFloats) {
-        this.brushHiddenRow = new Float32Array(rowFloats).fill(1);
+        this.brushHiddenRow = new Float32Array(rowFloats);
       }
+      this.brushHiddenRow.fill(this.brushColor === 'white' ? 1 : 0);
       for (let row = minY; row <= maxY; row++) {
         const byteOffset = (row * w + minX) * hiddenCount * 4;
         this.device.queue.writeBuffer(this.hiddenA, byteOffset, this.brushHiddenRow);

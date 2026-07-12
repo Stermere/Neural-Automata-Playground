@@ -62,3 +62,17 @@ npm install
 # Add -- --host to host it on your local network
 npm run dev
 ```
+
+### URL options
+
+The playground accepts these optional query parameters:
+
+- `width` / `height`: canvas dimensions (default: `1024`).
+- `brushSize`: initial brush size from `1` to `100` pixels (default: `20`).
+- `initialState`: canvas contents on load. Use `random` (default), `dot` for one white pixel in the center, or `none` for an empty black canvas.
+
+For example:
+
+```text
+?width=512&height=512&brushSize=1&initialState=dot
+```

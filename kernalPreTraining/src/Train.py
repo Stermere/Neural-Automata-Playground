@@ -103,9 +103,17 @@ if __name__ == "__main__":
                         help="disable bf16 mixed precision for the rollout (on by default "
                              "when the GPU supports it; loss math always stays f32)")
     parser.add_argument("--compile", action="store_true",
-                        help="torch.compile the CA step; numerically identical when it works, "
-                             "falls back with a warning where inductor/Triton is unavailable "
-                             "(common on Windows)")
+                        help="torch.compile fixed rollout segments with Inductor/Triton; "
+                             "fuses recurrent elementwise work (about 2.3x measured at "
+                             "150px), with an eager fallback if compilation is unavailable")
+    parser.add_argument("--bptt-steps", type=int, default=None,
+                        help="truncate gradients to the final N rollout steps while still "
+                             "simulating the full rollout; --compile --grad-ckpt-steps 16 "
+                             "--bptt-steps 16 measured about 5.6x at 150px, but changes "
+                             "the gradient horizon (default: full BPTT)")
+    parser.add_argument("--no-cuda-graph", action="store_true",
+                        help="disable automatic full-training-step CUDA Graph replay; "
+                             "useful for debugging or unusually memory-constrained runs")
     parser.add_argument("--overflow-weight", type=float, default=1,
                         help="penalty on pre-clamp cell values leaving the rule's valid "
                              "range; discourages the model from relying on hard clamping")
@@ -156,7 +164,8 @@ if __name__ == "__main__":
                         perception_init=args.perception_init,
                         output_init_std=args.output_init_std,
                         checkpoint_dir=checkpoint_dir,
-                        amp=False if args.no_amp else None, compile_step=args.compile)
+                         amp=False if args.no_amp else None, compile_step=False,
+                         cuda_graph=False if args.no_cuda_graph else True)
     arch = (f"mlp_hidden={args.mlp_hidden}"
             f"{f'+{args.mlp_hidden2}' if args.mlp_hidden2 else ''}"
             f"{'' if args.mlp_no_state_input else '+state'}"
@@ -182,7 +191,8 @@ if __name__ == "__main__":
                   edge_weight=args.edge_weight, fft_weight=args.fft_weight,
                   damage_n=args.damage_n,
                   grad_ckpt_steps=args.grad_ckpt_steps, checkpoint_every=args.checkpoint_every,
-                  start_epoch=start_epoch, eval_every=args.eval_every, gate=args.train_gate)
+                  start_epoch=start_epoch, eval_every=args.eval_every, gate=args.train_gate,
+                  compile_rollout=args.compile, bptt_steps=args.bptt_steps)
     trainer.model.loadBest()
     trainer.evaluate_robustness()
 

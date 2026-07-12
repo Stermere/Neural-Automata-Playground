@@ -2,3 +2,4 @@ torch
 torchvision
 matplotlib
 pillow
+triton-windows<3.8; platform_system == "Windows"

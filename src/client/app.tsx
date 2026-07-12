@@ -22,6 +22,14 @@ import { MlpConfig } from './utils/MlpUtils.ts';
 const params = new URLSearchParams(window.location.search);
 const width = parseInt(params.get("width") ?? "") || 1024;
 const height = parseInt(params.get("height") ?? "") || 1024;
+const requestedBrushSize = Number(params.get("brushSize"));
+const initialBrushSize = Number.isFinite(requestedBrushSize) && requestedBrushSize > 0
+  ? Math.min(100, Math.max(1, Math.round(requestedBrushSize)))
+  : 20;
+const requestedInitialState = params.get("initialState")?.toLowerCase();
+const initialState: 'random' | 'dot' | 'none' = requestedInitialState === 'dot' || requestedInitialState === 'none'
+  ? requestedInitialState
+  : 'random';
 
 const SIZE: [number, number] = [width, height];
 
@@ -51,7 +59,7 @@ export default function WebGPUNeuralAutomata(): JSX.Element {
     const config: AutomataConfig = {
       canvas,
       gridSize: SIZE,
-      brushRadius: 20,
+      brushRadius: initialBrushSize - 1,
     };
 
     
@@ -77,7 +85,13 @@ export default function WebGPUNeuralAutomata(): JSX.Element {
         controllerRef.current?.setActivationParameters(initialConfig.normalize);
         controllerRef.current?.setActivationFunctionCode(ActivationVariableUtils.transformActivationCodeDefault(initialConfig.activationCode));
       }
-      controllerRef.current?.randomizeCanvas();
+      if (initialState === 'dot') {
+        controllerRef.current?.seedCenterDot();
+      } else if (initialState === 'none') {
+        controllerRef.current?.clearCanvas();
+      } else {
+        controllerRef.current?.randomizeCanvas();
+      }
     }).catch((err) => {
       console.error(err);
       setWebgpuError('Failed to initialize WebGPU: ' + (err?.message || String(err)));
@@ -249,7 +263,9 @@ export default function WebGPUNeuralAutomata(): JSX.Element {
           onPause={(pause: boolean) => controllerRef.current?.togglePaused(pause)}
           onZoomChange={(zoom: number) => handleZoomChange(zoom)}
           onBrushSizeChange={(size: number) => controllerRef.current?.setBrushSize(size)}
+          onBrushColorChange={(color: 'white' | 'black') => controllerRef.current?.setBrushColor(color)}
           initialZoom={zoom}
+          initialBrushSize={initialBrushSize}
         />
         <NeuralAutomataConfig
           weights={weights}
